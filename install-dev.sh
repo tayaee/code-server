@@ -1,2 +1,5 @@
 #!/usr/bin/env bash
-(set -x; uv tool install --force --editable .)
+echo + uv tool install --force --editable .
+uv tool install --force --editable .
+echo + vscode-server --version
+vscode-server --version
