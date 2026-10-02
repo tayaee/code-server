@@ -2,9 +2,9 @@
 
 Run inside an active SSH session on the remote Linux machine:
 
-    launch-vscode
-    launch-vscode --server 192.168.1.10 --ssh-host myserver
-    launch-vscode --path /home/user/project --token s3cret
+    remote-code
+    remote-code --server 192.168.1.10 --ssh-host myserver
+    remote-code --path /home/user/project --token s3cret
 
 The server address defaults (in order) to:
   1. ``--server``
@@ -78,11 +78,41 @@ def resolve_target_dir(path_arg: str | None, path_opt: str | None) -> str:
     return os.path.normpath(str(p))
 
 
+def _is_loopback(host: str) -> bool:
+    """True when *host* is a loopback address (no fallback needed)."""
+    h = (host or "").strip().lower().strip("[]")
+    return h in ("127.0.0.1", "localhost", "::1")
+
+
+def _is_port_listening(host: str, port: int, timeout: float = 0.5) -> bool:
+    """Best-effort check whether *host*:*port* accepts TCP connections."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _post_launch(url: str, body: bytes, token: str | None, timeout: float) -> tuple[str, int]:
+    """POST the launch payload. Returns (raw_body, http_status).
+
+    Raises urllib.error.HTTPError (server reached, rejected) or
+    urllib.error.URLError / OSError / timeout (unreachable) to the caller.
+    """
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    token = normalize_token(token)
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", "replace"), resp.status
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point (keeps ``main(argv) -> int`` for tests/embedders)."""
     try:
         rc = cli.main(args=list(argv) if argv is not None else None,
-                      prog_name="launch-vscode", standalone_mode=False)
+                      prog_name="remote-code", standalone_mode=False)
         return rc if isinstance(rc, int) else 0
     except click.exceptions.Exit as e:
         return e.exit_code
@@ -100,10 +130,10 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
         if auto_ip:
             server = auto_ip
             if verbose:
-                print(f"[launch-vscode] auto-detected Windows host {server} from SSH env", file=sys.stderr)
+                print(f"[remote-code] auto-detected Windows host {server} from SSH env", file=sys.stderr)
         else:
             server = "127.0.0.1"
-            print("[launch-vscode] warning: not in an SSH session and --server not given; "
+            print("[remote-code] warning: not in an SSH session and --server not given; "
                    "trying 127.0.0.1 (works with `ssh -R 8259:localhost:8259`).",
                   file=sys.stderr)
 
@@ -114,67 +144,85 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
     hostname = local_hostname()
     ssh_host = resolve_ssh_host(ssh_host, hostname)
     if not ssh_host:
-        print("[launch-vscode] error: cannot determine SSH host alias. "
+        print("[remote-code] error: cannot determine SSH host alias. "
               "Pass --ssh-host <Remote-SSH Host> or set $CODE_SSH_HOST.", file=sys.stderr)
         return 2
 
     try:
         preview_uri = build_folder_uri(ssh_host, target_dir)
     except ValueError as e:
-        print(f"[launch-vscode] error: {e}", file=sys.stderr)
+        print(f"[remote-code] error: {e}", file=sys.stderr)
         return 2
 
-    url = f"http://{server}:{port}/launch"
     payload = {"path": target_dir, "host": ssh_host, "hostname": hostname, "user": user}
 
     if verbose or dry_run:
-        print(f"[launch-vscode] POST {url}", file=sys.stderr)
-        print(f"[launch-vscode] payload: {json.dumps(payload)}", file=sys.stderr)
-        print(f"[launch-vscode] will open: {preview_uri}", file=sys.stderr)
+        print(f"[remote-code] payload: {json.dumps(payload)}", file=sys.stderr)
+        print(f"[remote-code] will open: {preview_uri}", file=sys.stderr)
     if dry_run:
+        print(f"[remote-code] POST http://{server}:{port}/launch", file=sys.stderr)
         return 0
 
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=body, method="POST",
-                                 headers={"Content-Type": "application/json"})
-    token = normalize_token(token)
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
 
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", "replace")
-            status = resp.status
-    except urllib.error.HTTPError as e:
+    # Primary + loopback fallback (e.g. cloud host unreachable, ssh -R tunnel up).
+    candidates = [server]
+    if not _is_loopback(server):
+        candidates.append("127.0.0.1")
+
+    raw = ""
+    status = 0
+    last_error: Exception | None = None
+
+    for i, candidate in enumerate(candidates):
+        url = f"http://{candidate}:{port}/launch"
+        if i > 0:
+            probe_timeout = min(1.0, timeout) if timeout > 0 else 0.5
+            if not _is_port_listening(candidate, port, timeout=probe_timeout):
+                break  # nothing listening locally; report the primary failure.
+            print(f"[remote-code] {candidates[0]}:{port} unreachable, "
+                  f"falling back to {candidate}:{port} (ssh -R tunnel?)",
+                  file=sys.stderr)
+        if verbose:
+            print(f"[remote-code] POST {url}", file=sys.stderr)
         try:
-            detail = e.read().decode("utf-8", "replace")
-        except Exception:  # noqa: BLE001
-            detail = ""
-        print(f"[launch-vscode] server rejected request: HTTP {e.code} {detail}", file=sys.stderr)
-        if e.code == 401:
-            print("[launch-vscode] hint: token mismatch. Match --token with the server's --token.",
-                  file=sys.stderr)
-        elif e.code == 400:
-            print("[launch-vscode] hint: try --ssh-host <Remote-SSH Host alias from Windows ssh config>.",
-                  file=sys.stderr)
-        return 1
-    except urllib.error.URLError as e:
-        reason = getattr(e, "reason", e)
-        print(f"[launch-vscode] cannot reach vscode-server at {url}: {reason}", file=sys.stderr)
-        print("[launch-vscode] hints:", file=sys.stderr)
+            raw, status = _post_launch(url, body, token, timeout)
+            server = candidate  # actual endpoint used, shown in final log.
+            last_error = None
+            break
+        except urllib.error.HTTPError as e:
+            try:
+                detail = e.read().decode("utf-8", "replace")
+            except Exception:  # noqa: BLE001
+                detail = ""
+            print(f"[remote-code] server rejected request at {url}: "
+                  f"HTTP {e.code} {detail}", file=sys.stderr)
+            if e.code == 401:
+                print("[remote-code] hint: token mismatch. Match --token with the server's --token.",
+                      file=sys.stderr)
+            elif e.code == 400:
+                print("[remote-code] hint: try --ssh-host <Remote-SSH Host alias from Windows ssh config>.",
+                      file=sys.stderr)
+            return 1
+        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as e:
+            last_error = e
+            reason = getattr(e, "reason", e) if isinstance(e, urllib.error.URLError) else e
+            print(f"[remote-code] cannot reach vscode-server at {url}: {reason}", file=sys.stderr)
+            continue
+
+    if last_error is not None:
+        url = f"http://{server}:{port}/launch"
+        print("[remote-code] hints:", file=sys.stderr)
         print("  1. Is `vscode-server` running on Windows? (vscode-server --host 0.0.0.0)", file=sys.stderr)
         print("  2. Windows firewall allowing inbound TCP on the port?", file=sys.stderr)
         print(f"     PowerShell (admin): New-NetFirewallRule -DisplayName vscode-server "
               f"-Direction Inbound -LocalPort {port} -Protocol TCP -Action Allow", file=sys.stderr)
         print("  3. No direct LAN route? Use a reverse tunnel from Windows:", file=sys.stderr)
         print(f"     ssh -R {port}:localhost:{port} user@remote", file=sys.stderr)
-        print("     then: launch-vscode --server 127.0.0.1", file=sys.stderr)
+        print("     then: remote-code --server 127.0.0.1", file=sys.stderr)
         if not auto_ip:
             print("  4. $SSH_CLIENT/$SSH_CONNECTION empty: you may be in tmux/screen; "
                   "pass --server explicitly.", file=sys.stderr)
-        return 1
-    except (socket.timeout, TimeoutError, OSError) as e:
-        print(f"[launch-vscode] connection failed: {e}", file=sys.stderr)
         return 1
 
     try:
@@ -183,15 +231,15 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
         data = {"raw": raw}
     uri = data.get("uri", preview_uri) if isinstance(data, dict) else preview_uri
     if status == 200:
-        print(f"Connecting to {server}:{port} to open VS Code on {target_dir} using {uri}")
+        print(f"Connecting to {server}:{port} to run [code --folder-uri {uri}]")
         if isinstance(data, dict):
             if data.get("ssh_config") == "added":
-                print(f"[launch-vscode] ssh config updated: log in as '{data.get('ssh_user')}'.",
+                print(f"[remote-code] ssh config updated: log in as '{data.get('ssh_user')}'.",
                       file=sys.stderr)
             elif data.get("warning"):
-                print(f"[launch-vscode] warning: {data['warning']}", file=sys.stderr)
+                print(f"[remote-code] warning: {data['warning']}", file=sys.stderr)
         return 0
-    print(f"[launch-vscode] unexpected status HTTP {status}: {raw}", file=sys.stderr)
+    print(f"[remote-code] unexpected status HTTP {status}: {raw}", file=sys.stderr)
     return 1
 
 

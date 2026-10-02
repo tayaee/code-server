@@ -6,7 +6,7 @@ Run on your Windows machine:
 
 Then from the remote Linux box (inside SSH):
 
-    launch-vscode --server <windows-ip>
+    remote-code --server <windows-ip>
 
 Protocol (JSON over HTTP):
     POST /launch  {"path": "/home/user/proj", "host": "myserver", ...}

@@ -31,7 +31,7 @@ Issues = "https://github.com/tayaee/vscode-server/issues"
 
 [project.scripts]
 vscode-server = "vscode_server.server:main"
-launch-vscode = "vscode_server.client:main"
+remote-code = "vscode_server.client:main"
 
 [build-system]
 requires = ["hatchling"]
