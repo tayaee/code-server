@@ -38,6 +38,7 @@ from .common import (
     ENV_TOKEN,
     LAUNCH_PATHS,
     build_folder_uri,
+    ensure_ssh_user,
     find_code_binary,
     normalize_token,
 )
@@ -164,10 +165,28 @@ def make_handler(config: ServerConfig):
                 _send_json(self, 400, {"error": str(e)})
                 return
 
+            # Windows <-> Linux login ids may differ. The folder URI cannot
+            # carry a username, so make the ssh config log in as the Linux id.
+            login_user = str(data.get("user") or "").strip()
+            ssh_result: dict = {}
+            if login_user:
+                try:
+                    server_user = getpass.getuser()
+                except Exception:  # noqa: BLE001
+                    server_user = ""
+                if server_user and login_user == server_user:
+                    ssh_result = {"ssh_user": login_user, "ssh_config": "ok"}
+                else:
+                    status, message = ensure_ssh_user(ssh_host, login_user)
+                    ssh_result = {"ssh_user": login_user, "ssh_config": status}
+                    log.info("SSH user handling for %s: %s (%s)", ssh_host, status, message)
+                    if status in ("missing", "error"):
+                        ssh_result["warning"] = message
+
             log.info("Launch request from %s: host=%s path=%s", self.client_address[0], ssh_host, remote_path)
 
             if config.dry_run:
-                _send_json(self, 200, {"status": "dry-run", "uri": uri})
+                _send_json(self, 200, {"status": "dry-run", "uri": uri, **ssh_result})
                 return
 
             try:
@@ -190,7 +209,7 @@ def make_handler(config: ServerConfig):
                 _send_json(self, 500, {"error": f"failed to launch VS Code: {e}"})
                 return
 
-            _send_json(self, 200, {"status": "launched", "uri": uri})
+            _send_json(self, 200, {"status": "launched", "uri": uri, **ssh_result})
 
     return LaunchHandler
 

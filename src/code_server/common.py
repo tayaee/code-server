@@ -17,6 +17,7 @@ ENV_TOKEN = "CODE_SERVER_TOKEN"
 ENV_SSH_HOST = "CODE_SSH_HOST"  # Remote-SSH Host alias as known on the Windows side
 ENV_SSH_HOST_ALT = "CODE_SERVER_SSH_HOST"
 ENV_CODE_BIN = "CODE_SERVER_BINARY"
+ENV_SSH_CONFIG = "CODE_SSH_CONFIG"  # override path to ssh config (default: ~/.ssh/config)
 
 LAUNCH_PATHS = ("/launch", "/open", "/")
 
@@ -146,3 +147,107 @@ def local_hostname() -> str:
         return socket.gethostname()
     except OSError:
         return "unknown"
+
+
+def ssh_config_path() -> Path:
+    """Path to the ssh client config (override via $CODE_SSH_CONFIG)."""
+    override = os.environ.get(ENV_SSH_CONFIG, "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".ssh" / "config"
+
+
+def _split_directive(line: str) -> tuple[str, str] | None:
+    """Split an ssh-config line into (keyword, args); None for blank/comment."""
+    s = line.strip()
+    if not s or s.startswith("#"):
+        return None
+    if "=" in s:
+        key, _, rest = s.partition("=")
+        return key.strip(), rest.strip()
+    parts = s.split(None, 1)
+    if len(parts) != 2:
+        return None
+    return parts[0], parts[1].strip()
+
+
+def ensure_ssh_user(host_alias: str, login_user: str,
+                    config_path: Path | None = None) -> tuple[str, str]:
+    """Ensure ssh config logs into *host_alias* as *login_user*.
+
+    A ``vscode-remote://`` folder URI cannot carry a username, so the Linux
+    login id must come from the Windows ssh config's ``User`` directive.
+    This inserts ``User <login_user>`` into the first matching ``Host`` block
+    (with a ``.bak`` backup) when no ``User`` (and no global ``Host *`` user)
+    already covers the alias.
+
+    Returns (status, message); status is one of:
+      "ok"      - a User directive already covers the alias (untouched)
+      "added"   - User directive was inserted
+      "missing" - no Host block for the alias; user must create one manually
+      "error"   - config could not be read/written (see message)
+    Only top-level ``Host`` blocks are examined (``Match``/``Include``d
+    files are out of scope).
+    """
+    host_alias = host_alias.strip()
+    login_user = login_user.strip()
+    if not host_alias or not login_user:
+        return "error", "empty host alias or login user"
+    path = config_path or ssh_config_path()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "missing", f"ssh config not found: {path}"
+    except OSError as e:
+        return "error", f"cannot read ssh config {path}: {e}"
+
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = text.splitlines(keepends=True)
+
+    # Locate blocks: list of (host_line_index, [patterns]).
+    blocks: list[tuple[int, list[str]]] = []
+    for i, raw in enumerate(lines):
+        d = _split_directive(raw.split("#", 1)[0] if "#" in raw else raw)
+        # NOTE: strip inline comments naively; '#' never appears in Host patterns.
+        if d and d[0].lower() == "host":
+            blocks.append((i, d[1].split()))
+
+    def block_user(start: int) -> str | None:
+        end = next((b[0] for b in blocks if b[0] > start), len(lines))
+        for raw in lines[start + 1:end]:
+            d = _split_directive(raw)
+            if d and d[0].lower() == "user":
+                return d[1].split()[0] if d[1].split() else ""
+        return None
+
+    alias_lc = host_alias.lower()
+    exact = [b for b in blocks if any(p.lower() == alias_lc for p in b[1])]
+    star_user = next((u for b in blocks if b[1] == ["*"] for u in [block_user(b[0])] if u), None)
+
+    for b in exact:
+        if block_user(b[0]):
+            return "ok", f"Host {host_alias} already sets User"
+    if star_user:
+        return "ok", "global 'Host *' already sets User"
+
+    if not exact:
+        return ("missing",
+                f"No 'Host {host_alias}' block in {path}; add one with "
+                f"'User {login_user}' so VS Code logs in as the Linux id.")
+
+    # Insert into the first matching block, mirroring its indent style.
+    idx = exact[0][0]
+    end = next((b[0] for b in blocks if b[0] > idx), len(lines))
+    indent = "    "
+    for raw in lines[idx + 1:end]:
+        stripped = raw.lstrip()
+        if stripped and not stripped.startswith("#") and raw[:len(raw) - len(stripped)]:
+            indent = raw[:len(raw) - len(stripped)]
+            break
+    lines.insert(idx + 1, f"{indent}User {login_user}{newline}")
+    try:
+        shutil.copy2(path, path.with_name(path.name + ".bak"))
+        path.write_text("".join(lines), encoding="utf-8")
+    except OSError as e:
+        return "error", f"cannot update ssh config {path}: {e}"
+    return "added", f"Set 'User {login_user}' for Host {host_alias} in {path}"

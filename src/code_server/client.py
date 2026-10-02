@@ -176,6 +176,12 @@ def main(argv: list[str] | None = None) -> int:
     uri = data.get("uri", preview_uri) if isinstance(data, dict) else preview_uri
     if status == 200:
         print(f"Triggered VS Code -> {uri}")
+        if isinstance(data, dict):
+            if data.get("ssh_config") == "added":
+                print(f"[launch-code] ssh config updated: log in as '{data.get('ssh_user')}'.",
+                      file=sys.stderr)
+            elif data.get("warning"):
+                print(f"[launch-code] warning: {data['warning']}", file=sys.stderr)
         return 0
     print(f"[launch-code] unexpected status HTTP {status}: {raw}", file=sys.stderr)
     return 1
