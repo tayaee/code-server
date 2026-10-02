@@ -10,7 +10,7 @@ The server address defaults (in order) to:
   1. ``--server``
   2. ``$CODE_SERVER_HOST``
   3. client IP from ``$SSH_CLIENT`` / ``$SSH_CONNECTION``
-  4. ``127.0.0.1`` (works with ``ssh -R 8765:localhost:8765`` reverse tunnel)
+  4. ``127.0.0.1`` (works with ``ssh -R 8259:localhost:8259`` reverse tunnel)
 
 Payload sent: ``POST http://<server>:<port>/launch``
 ``{"path": "<cwd>", "host": "<ssh-alias>", "hostname": ..., "user": ...}``
@@ -18,7 +18,6 @@ Payload sent: ``POST http://<server>:<port>/launch``
 
 from __future__ import annotations
 
-import argparse
 import getpass
 import json
 import os
@@ -28,6 +27,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import click
+
+from . import __version__
 from .common import (
     DEFAULT_PORT,
     DEFAULT_TIMEOUT,
@@ -41,33 +43,30 @@ from .common import (
 )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="launch-code",
-        description="Trigger the Windows code-server listener to open VS Code "
-                    "on this remote directory. Run on Linux inside SSH.",
-    )
-    p.add_argument("path", nargs="?", default=None,
-                   help="Remote directory to open (default: current directory).")
-    p.add_argument("--path", dest="path_opt", default=None,
-                   help="Same as positional PATH (explicit flag).")
-    p.add_argument("--server", "--host", dest="server", default=os.environ.get("CODE_SERVER_HOST"),
-                   help="Windows machine address (default: auto-detect from $SSH_CLIENT, "
-                        "else 127.0.0.1 for SSH -R tunnels; env CODE_SERVER_HOST).")
-    p.add_argument("--port", type=int, default=int(os.environ.get(ENV_PORT, DEFAULT_PORT)),
-                   help=f"code-server port (default: {DEFAULT_PORT}; env {ENV_PORT}).")
-    p.add_argument("--token", default=os.environ.get(ENV_TOKEN),
-                   help=f"Optional shared secret, only needed when the server was started "
-                        f"with one (env {ENV_TOKEN}). Omit to send no token.")
-    p.add_argument("--ssh-host", default=None,
-                   help="Remote-SSH Host alias as configured on Windows "
-                        "(default: $CODE_SSH_HOST or local hostname).")
-    p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
-                   help=f"HTTP timeout in seconds (default: {DEFAULT_TIMEOUT}).")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Print the request without sending it.")
-    p.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
-    return p
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.argument("path", required=False, default=None)
+@click.option("--path", "path_opt", default=None,
+              help="Same as positional PATH (explicit flag).")
+@click.option("--server", "--host", "server", default=None, envvar="CODE_SERVER_HOST",
+              help="Windows machine address (default: auto-detect from $SSH_CONNECTION / "
+                   "$SSH_CLIENT, else 127.0.0.1 for SSH -R tunnels; env CODE_SERVER_HOST).")
+@click.option("--port", type=int, default=DEFAULT_PORT, envvar=ENV_PORT, show_default=True,
+              help=f"code-server port (env {ENV_PORT}).")
+@click.option("--token", default=None, envvar=ENV_TOKEN,
+              help=f"Optional shared secret, only needed when the server was started "
+                   f"with one (env {ENV_TOKEN}). Omit to send no token.")
+@click.option("--ssh-host", default=None,
+              help="Remote-SSH Host alias as configured on Windows "
+                   "(default: $CODE_SSH_HOST or local hostname).")
+@click.option("--timeout", type=float, default=DEFAULT_TIMEOUT, show_default=True,
+              help="HTTP timeout in seconds.")
+@click.option("--dry-run", is_flag=True,
+              help="Print the request without sending it.")
+@click.option("--verbose", is_flag=True, help="Verbose output.")
+@click.version_option(__version__, "-v", "--version", message="%(version)s")
+def cli(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbose) -> int:
+    """Trigger the Windows code-server listener to open VS Code here."""
+    return _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbose)
 
 
 def resolve_target_dir(path_arg: str | None, path_opt: str | None) -> str:
@@ -80,13 +79,22 @@ def resolve_target_dir(path_arg: str | None, path_opt: str | None) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    verbose = args.verbose
+    """Entry point (keeps ``main(argv) -> int`` for tests/embedders)."""
+    try:
+        rc = cli.main(args=list(argv) if argv is not None else None,
+                      prog_name="launch-code", standalone_mode=False)
+        return rc if isinstance(rc, int) else 0
+    except click.exceptions.Exit as e:
+        return e.exit_code
+    except (click.ClickException, click.Abort) as e:
+        e.show()
+        return getattr(e, "exit_code", 1)
 
-    target_dir = resolve_target_dir(args.path, args.path_opt)
 
-    server = (args.server or "").strip()
+def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbose) -> int:
+    target_dir = resolve_target_dir(path, path_opt)
+
+    server = (server or "").strip()
     auto_ip = detect_client_ip()
     if not server:
         if auto_ip:
@@ -96,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             server = "127.0.0.1"
             print("[launch-code] warning: not in an SSH session and --server not given; "
-                  "trying 127.0.0.1 (works with `ssh -R 8765:localhost:8765`).",
+                   "trying 127.0.0.1 (works with `ssh -R 8259:localhost:8259`).",
                   file=sys.stderr)
 
     try:
@@ -104,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # noqa: BLE001
         user = ""
     hostname = local_hostname()
-    ssh_host = resolve_ssh_host(args.ssh_host, hostname)
+    ssh_host = resolve_ssh_host(ssh_host, hostname)
     if not ssh_host:
         print("[launch-code] error: cannot determine SSH host alias. "
               "Pass --ssh-host <Remote-SSH Host> or set $CODE_SSH_HOST.", file=sys.stderr)
@@ -116,25 +124,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[launch-code] error: {e}", file=sys.stderr)
         return 2
 
-    url = f"http://{server}:{args.port}/launch"
+    url = f"http://{server}:{port}/launch"
     payload = {"path": target_dir, "host": ssh_host, "hostname": hostname, "user": user}
 
-    if verbose or args.dry_run:
+    if verbose or dry_run:
         print(f"[launch-code] POST {url}", file=sys.stderr)
         print(f"[launch-code] payload: {json.dumps(payload)}", file=sys.stderr)
         print(f"[launch-code] will open: {preview_uri}", file=sys.stderr)
-    if args.dry_run:
+    if dry_run:
         return 0
 
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST",
                                  headers={"Content-Type": "application/json"})
-    token = normalize_token(args.token)
+    token = normalize_token(token)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
 
     try:
-        with urllib.request.urlopen(req, timeout=args.timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", "replace")
             status = resp.status
     except urllib.error.HTTPError as e:
@@ -157,9 +165,9 @@ def main(argv: list[str] | None = None) -> int:
         print("  1. Is `code-server` running on Windows? (code-server --host 0.0.0.0)", file=sys.stderr)
         print("  2. Windows firewall allowing inbound TCP on the port?", file=sys.stderr)
         print(f"     PowerShell (admin): New-NetFirewallRule -DisplayName code-server "
-              f"-Direction Inbound -LocalPort {args.port} -Protocol TCP -Action Allow", file=sys.stderr)
+              f"-Direction Inbound -LocalPort {port} -Protocol TCP -Action Allow", file=sys.stderr)
         print("  3. No direct LAN route? Use a reverse tunnel from Windows:", file=sys.stderr)
-        print(f"     ssh -R {args.port}:localhost:{args.port} user@remote", file=sys.stderr)
+        print(f"     ssh -R {port}:localhost:{port} user@remote", file=sys.stderr)
         print("     then: launch-code --server 127.0.0.1", file=sys.stderr)
         if not auto_ip:
             print("  4. $SSH_CLIENT/$SSH_CONNECTION empty: you may be in tmux/screen; "

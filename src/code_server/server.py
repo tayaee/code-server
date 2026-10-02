@@ -2,7 +2,7 @@
 
 Run on your Windows machine:
 
-    code-server --port 8765 --token s3cret
+    code-server --port 8259 --token s3cret
 
 Then from the remote Linux box (inside SSH):
 
@@ -18,7 +18,6 @@ Auth: if the server was started with a token, the client must send
 
 from __future__ import annotations
 
-import argparse
 import getpass
 import json
 import logging
@@ -29,6 +28,9 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+import click
+
+from . import __version__
 from .common import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -214,41 +216,49 @@ def make_handler(config: ServerConfig):
     return LaunchHandler
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="code-server",
-        description="Listen for HTTP triggers and open local VS Code on the remote directory "
-                    "(via Remote-SSH folder URI). Run this on Windows.",
-    )
-    p.add_argument("--host", default=os.environ.get(ENV_HOST, DEFAULT_HOST),
-                   help=f"Bind address (default: {DEFAULT_HOST}; env {ENV_HOST})")
-    p.add_argument("--port", type=int, default=int(os.environ.get(ENV_PORT, DEFAULT_PORT)),
-                   help=f"Listen port (default: {DEFAULT_PORT}; env {ENV_PORT})")
-    p.add_argument("--token", default=os.environ.get(ENV_TOKEN),
-                   help=f"Optional shared secret (env {ENV_TOKEN}). "
-                        "If set, client must present it; if omitted, all requests are accepted.")
-    p.add_argument("--generate-token", action="store_true",
-                   help="Print a random token and exit (use it for --token).")
-    p.add_argument("--code-binary", default=os.environ.get(ENV_CODE_BIN),
-                   help=f"Path to VS Code CLI (default: auto-detect; env {ENV_CODE_BIN})")
-    p.add_argument("--default-host", default=None,
-                   help="Default Remote-SSH Host alias when the trigger omits 'host'.")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Accept requests but only log the URI instead of launching VS Code.")
-    p.add_argument("-v", "--verbose", action="store_true", help="Verbose logging.")
-    return p
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--host", default=DEFAULT_HOST, envvar=ENV_HOST, show_default=True,
+              help=f"Bind address (env {ENV_HOST}).")
+@click.option("--port", type=int, default=DEFAULT_PORT, envvar=ENV_PORT, show_default=True,
+              help=f"Listen port (env {ENV_PORT}).")
+@click.option("--token", default=None, envvar=ENV_TOKEN,
+              help=f"Optional shared secret (env {ENV_TOKEN}). "
+                   "If set, client must present it; if omitted, all requests are accepted.")
+@click.option("--generate-token", is_flag=True,
+              help="Print a random token and exit (use it for --token).")
+@click.option("--code-binary", default=None, envvar=ENV_CODE_BIN,
+              help=f"Path to VS Code CLI (default: auto-detect; env {ENV_CODE_BIN}).")
+@click.option("--default-host", default=None,
+              help="Default Remote-SSH Host alias when the trigger omits 'host'.")
+@click.option("--dry-run", is_flag=True,
+              help="Accept requests but only log the URI instead of launching VS Code.")
+@click.option("--verbose", is_flag=True, help="Verbose logging.")
+@click.version_option(__version__, "-v", "--version", message="%(version)s")
+def cli(host, port, token, generate_token, code_binary, default_host, dry_run, verbose) -> int:
+    """Listen for HTTP triggers and open local VS Code on the remote directory."""
+    return _run(host, port, token, generate_token, code_binary, default_host, dry_run, verbose)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    """Entry point (keeps ``main(argv) -> int`` for tests/embedders)."""
+    try:
+        rc = cli.main(args=list(argv) if argv is not None else None,
+                      prog_name="code-server", standalone_mode=False)
+        return rc if isinstance(rc, int) else 0
+    except click.exceptions.Exit as e:
+        return e.exit_code
+    except (click.ClickException, click.Abort) as e:
+        e.show()
+        return getattr(e, "exit_code", 1)
 
+
+def _run(host, port, token, generate_token, code_binary, default_host, dry_run, verbose) -> int:
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    if args.generate_token:
+    if generate_token:
         print(secrets.token_urlsafe(32))
         return 0
 
@@ -258,12 +268,12 @@ def main(argv: list[str] | None = None) -> int:
         user = "?"
 
     config = ServerConfig(
-        host=args.host,
-        port=args.port,
-        token=normalize_token(args.token),
-        code_binary=args.code_binary,
-        default_host=args.default_host,
-        dry_run=args.dry_run,
+        host=host,
+        port=port,
+        token=normalize_token(token),
+        code_binary=code_binary,
+        default_host=default_host,
+        dry_run=dry_run,
     )
 
     try:

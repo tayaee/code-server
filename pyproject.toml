@@ -22,7 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Topic :: System :: Networking",
 ]
-dependencies = []
+dependencies = ["click>=8.1"]
 
 [project.urls]
 Homepage = "https://github.com/tayaee/code-server"

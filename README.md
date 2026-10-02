@@ -3,15 +3,10 @@
 Windows VS Code로 원격 Linux 디렉토리를 여는 도구 (Linux에 VS Code 불필요).
 
 ## Windows
-설치
+설치 / 업그레이드 (같은 명령어)
 ```
-Windows% uv tool install --from git+https://github.com/tayaee/code-server.git code-server
+Windows% uv tool install --from git+https://github.com/tayaee/code-server.git --force code-server
 Windows% code-server --help
-```
-
-업그레이드 (선택)
-```
-Windows% uv tool upgrade code-server
 ```
 
 실행
@@ -20,15 +15,10 @@ Windows% code-server
 ```
 
 ## Linux
-ssh 로그인 하여 설치
+ssh 로그인 하여 설치 / 업그레이드 (같은 명령어)
 ```
-Linux $ uv tool install --from git+https://github.com/tayaee/code-server.git code-server
+Linux $ uv tool install --from git+https://github.com/tayaee/code-server.git --force code-server
 Linux $ launch-code --help
-```
-
-업그레이드 (선택)
-```
-Linux $ uv tool upgrade code-server
 ```
 
 실행

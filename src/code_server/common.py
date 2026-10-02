@@ -7,7 +7,7 @@ import shutil
 import socket
 from pathlib import Path
 
-DEFAULT_PORT = 8765
+DEFAULT_PORT = 8259
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_TIMEOUT = 10
 

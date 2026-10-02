@@ -4,8 +4,12 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from code_server.client import build_parser as client_parser
+import click
+
+from code_server.client import cli as client_cli
 from code_server.client import main as client_main
+from code_server.server import cli as server_cli
+from code_server.server import main as server_main
 from code_server.common import (
     build_folder_uri,
     detect_client_ip,
@@ -36,9 +40,17 @@ def test_build_folder_uri():
 
 
 def test_client_parser_defaults():
-    args = client_parser().parse_args([])
-    assert args.port == 8765
-    assert args.server is None or isinstance(args.server, str)
+    defaults = {p.name: p.default for p in client_cli.params if isinstance(p, click.Option)}
+    assert defaults["port"] == 8259
+    assert defaults["server"] is None
+
+
+def test_client_version(capsys):
+    from code_server import __version__
+    assert client_main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == __version__
+    assert server_main(["-v"]) == 0
+    assert capsys.readouterr().out.strip() == __version__
 
 
 def test_normalize_token_optional():
@@ -158,7 +170,7 @@ def test_code_server_host_env_is_used(monkeypatch, capsys):
     monkeypatch.setenv("CODE_SERVER_HOST", "10.9.9.9")
     monkeypatch.setenv("CODE_SSH_HOST", "h")
     assert client_main(["--dry-run"]) == 0
-    assert "http://10.9.9.9:8765/launch" in capsys.readouterr().err
+    assert "http://10.9.9.9:8259/launch" in capsys.readouterr().err
 
 
 def test_explicit_server_beats_env(monkeypatch, capsys):
@@ -166,7 +178,7 @@ def test_explicit_server_beats_env(monkeypatch, capsys):
     monkeypatch.setenv("CODE_SSH_HOST", "h")
     assert client_main(["--dry-run", "--server", "192.168.0.1"]) == 0
     err = capsys.readouterr().err
-    assert "http://192.168.0.1:8765/launch" in err
+    assert "http://192.168.0.1:8259/launch" in err
     assert "10.9.9.9" not in err
 
 
