@@ -157,6 +157,17 @@ def ssh_config_path() -> Path:
     return Path.home() / ".ssh" / "config"
 
 
+def _is_plain_hostname(s: str) -> bool:
+    """True if *s* looks like a directly connectable hostname (no patterns).
+
+    e.g. ``spark1.local`` or ``192.168.1.10`` qualify; bare nicknames
+    (``myserver``) and anything with wildcards do not.
+    """
+    if not s or any(c in s for c in (" ", "*", "?", "!", "/", "\\", "@", ":")):
+        return False
+    return "." in s or _looks_like_ip(s)
+
+
 def _split_directive(line: str) -> tuple[str, str] | None:
     """Split an ssh-config line into (keyword, args); None for blank/comment."""
     s = line.strip()
@@ -183,11 +194,17 @@ def ensure_ssh_user(host_alias: str, login_user: str,
 
     Returns (status, message); status is one of:
       "ok"      - a User directive already covers the alias (untouched)
-      "added"   - User directive was inserted
-      "missing" - no Host block for the alias; user must create one manually
+      "added"   - User directive was inserted (or a minimal Host block created)
+      "missing" - no Host block for the alias and it is not itself a
+                  connectable hostname; user must create one manually
       "error"   - config could not be read/written (see message)
     Only top-level ``Host`` blocks are examined (``Match``/``Include``d
     files are out of scope).
+
+    When the alias is itself a hostname (e.g. ``spark1.local`` — the same
+    name a working ``ssh user@host`` uses), a minimal block reproducing
+    exactly that command is appended automatically, so no manual
+    registration is needed.
     """
     host_alias = host_alias.strip()
     login_user = login_user.strip()
@@ -231,9 +248,26 @@ def ensure_ssh_user(host_alias: str, login_user: str,
         return "ok", "global 'Host *' already sets User"
 
     if not exact:
+        if _is_plain_hostname(host_alias):
+            # The alias is itself a connectable hostname (the same name a
+            # working `ssh user@host` uses). Append a minimal block that
+            # reproduces exactly that command -- no manual registration needed.
+            if not text.endswith(("\n", "\r")):
+                text += newline
+            block = (f"{newline}Host {host_alias}{newline}"
+                     f"    HostName {host_alias}{newline}"
+                     f"    User {login_user}{newline}")
+            try:
+                shutil.copy2(path, path.with_name(path.name + ".bak"))
+                path.write_text(text + block, encoding="utf-8")
+            except OSError as e:
+                return "error", f"cannot update ssh config {path}: {e}"
+            return "added", (f"Created 'Host {host_alias}' in {path} "
+                             f"(HostName {host_alias}, User {login_user})")
         return ("missing",
                 f"No 'Host {host_alias}' block in {path}; add one with "
-                f"'User {login_user}' so VS Code logs in as the Linux id.")
+                f"'HostName <real-host>' and 'User {login_user}' so VS Code "
+                "logs in as the Linux id.")
 
     # Insert into the first matching block, mirroring its indent style.
     idx = exact[0][0]

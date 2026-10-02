@@ -206,8 +206,23 @@ def test_ensure_ssh_user_missing_block(tmp_path):
     cfg = tmp_path / "config"
     cfg.write_text("Host other\n    HostName 10.0.0.2\n", encoding="utf-8")
     status, msg = ensure_ssh_user("myserver", "linuxid", cfg)
-    assert status == "missing"
+    assert status == "missing"  # bare nickname: HostName unknowable
     assert "linuxid" in msg
+
+
+def test_ensure_ssh_user_creates_block_for_hostname(tmp_path):
+    # `ssh user1@spark1.local` works with no config -> reproduce it as a block.
+    cfg = tmp_path / "config"
+    cfg.write_text("Host other\n    HostName 10.0.0.2\n", encoding="utf-8")
+    status, _ = ensure_ssh_user("spark1.local", "user1", cfg)
+    assert status == "added"
+    text = cfg.read_text(encoding="utf-8")
+    assert "Host spark1.local" in text
+    assert "HostName spark1.local" in text
+    assert "User user1" in text
+    # Second call is a no-op now.
+    status, _ = ensure_ssh_user("spark1.local", "user1", cfg)
+    assert status == "ok"
 
 
 def test_ensure_ssh_user_missing_file(tmp_path):
