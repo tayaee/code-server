@@ -180,8 +180,8 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
             probe_timeout = min(1.0, timeout) if timeout > 0 else 0.5
             if not _is_port_listening(candidate, port, timeout=probe_timeout):
                 break  # nothing listening locally; report the primary failure.
-            print(f"[remote-code] {candidates[0]}:{port} unreachable, "
-                  f"falling back to {candidate}:{port} (ssh -R tunnel?)",
+            print(f"[remote-code] info: {candidates[0]}:{port} not directly reachable, "
+                  f"trying {candidate}:{port} via ssh -R tunnel",
                   file=sys.stderr)
         if verbose:
             print(f"[remote-code] POST {url}", file=sys.stderr)
