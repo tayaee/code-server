@@ -1,0 +1,51 @@
+[project]
+name = "code-server"
+version = "0.1.0"
+description = "Launch your local Windows VS Code onto a remote Linux directory over SSH via an HTTP trigger."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "tayaee" }]
+requires-python = ">=3.10"
+keywords = ["vscode", "ssh", "remote", "cli"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: System :: Networking",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/tayaee/code-server"
+Repository = "https://github.com/tayaee/code-server.git"
+Issues = "https://github.com/tayaee/code-server/issues"
+
+[project.scripts]
+code-server = "code_server.server:main"
+launch-code = "code_server.client:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_server"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [".git", ".github", "tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
