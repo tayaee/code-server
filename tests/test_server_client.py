@@ -6,17 +6,17 @@ from http.server import ThreadingHTTPServer
 
 import click
 
-from code_server.client import cli as client_cli
-from code_server.client import main as client_main
-from code_server.server import cli as server_cli
-from code_server.server import main as server_main
-from code_server.common import (
+from vscode_server.client import cli as client_cli
+from vscode_server.client import main as client_main
+from vscode_server.server import cli as server_cli
+from vscode_server.server import main as server_main
+from vscode_server.common import (
     build_folder_uri,
     detect_client_ip,
     ensure_ssh_user,
     normalize_token,
 )
-from code_server.server import make_handler, ServerConfig
+from vscode_server.server import make_handler, ServerConfig
 
 
 def _post(port, body, token=None):
@@ -46,7 +46,7 @@ def test_client_parser_defaults():
 
 
 def test_client_version(capsys):
-    from code_server import __version__
+    from vscode_server import __version__
     assert client_main(["--version"]) == 0
     assert capsys.readouterr().out.strip() == __version__
     assert server_main(["-v"]) == 0

@@ -13,7 +13,7 @@ Protocol (JSON over HTTP):
     -> launches ``code --folder-uri vscode-remote://ssh-remote+myserver/home/user/proj``
 
 Auth: if the server was started with a token, the client must send
-``Authorization: Bearer <token>`` or ``X-Code-Server-Token: <token>``.
+``Authorization: Bearer <token>`` or ``X-Vscode-Server-Token: <token>``.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def _check_auth(handler: BaseHTTPRequestHandler, token: str | None) -> bool:
         presented = auth[len("Bearer "):].strip()
         if secrets.compare_digest(presented, token):
             return True
-    presented = handler.headers.get("X-Code-Server-Token", "").strip()
+    presented = handler.headers.get("X-Vscode-Server-Token", "").strip()
     if presented and secrets.compare_digest(presented, token):
         return True
     return False
