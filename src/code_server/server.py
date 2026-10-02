@@ -2,11 +2,11 @@
 
 Run on your Windows machine:
 
-    code-server --port 8259 --token s3cret
+    vscode-server --port 8259 --token s3cret
 
 Then from the remote Linux box (inside SSH):
 
-    launch-code --server <windows-ip>
+    launch-vscode --server <windows-ip>
 
 Protocol (JSON over HTTP):
     POST /launch  {"path": "/home/user/proj", "host": "myserver", ...}
@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import secrets
+import shlex
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -45,7 +46,7 @@ from .common import (
     normalize_token,
 )
 
-log = logging.getLogger("code-server")
+log = logging.getLogger("vscode-server")
 
 MAX_BODY_BYTES = 64 * 1024
 
@@ -95,7 +96,7 @@ def _send_json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> N
 
 def make_handler(config: ServerConfig):
     class LaunchHandler(BaseHTTPRequestHandler):
-        server_version = "code-server/0.1.0"
+        server_version = "vscode-server/0.1.0"
 
         def log_message(self, fmt, *args):  # noqa: N802 - stdlib signature
             log.info("%s - %s", self.address_string(), fmt % args)
@@ -106,13 +107,13 @@ def make_handler(config: ServerConfig):
         def do_GET(self):  # noqa: N802
             route = self._route()
             if route == "/health":
-                _send_json(self, 200, {"status": "ok", "service": "code-server"})
+                _send_json(self, 200, {"status": "ok", "service": "vscode-server"})
             elif route in ("/", "/launch", "/open"):
                 _send_json(
                     self,
                     200,
                     {
-                        "service": "code-server",
+                        "service": "vscode-server",
                         "usage": "POST /launch with JSON {path, host}",
                         "example": {
                             "path": "/home/user/project",
@@ -143,6 +144,8 @@ def make_handler(config: ServerConfig):
                 return
 
             if not _check_auth(self, config.token):
+                log.warning("Rejected unauthorized %s %s from %s:%d",
+                            "POST", route, *self.client_address[:2])
                 _send_json(self, 401, {"error": "unauthorized: bad or missing token"})
                 return
 
@@ -185,7 +188,8 @@ def make_handler(config: ServerConfig):
                     if status in ("missing", "error"):
                         ssh_result["warning"] = message
 
-            log.info("Launch request from %s: host=%s path=%s", self.client_address[0], ssh_host, remote_path)
+            log.info("Launch request from %s:%d: host=%s path=%s user=%s",
+                       *self.client_address[:2], ssh_host, remote_path, login_user or "-")
 
             if config.dry_run:
                 _send_json(self, 200, {"status": "dry-run", "uri": uri, **ssh_result})
@@ -200,12 +204,14 @@ def make_handler(config: ServerConfig):
             try:
                 # Detached so the HTTP response returns immediately and the
                 # VS Code process outlives the handler thread.
+                cmd = [code_bin, "--folder-uri", uri]
+                log.info("Executing for %s:%d: %s", *self.client_address[:2], shlex.join(cmd))
                 kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
                 if os.name == "nt":
                     kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0)  # type: ignore[attr-defined]
                 else:
                     kwargs["start_new_session"] = True
-                subprocess.Popen([code_bin, "--folder-uri", uri], **kwargs)  # noqa: S603
+                subprocess.Popen(cmd, **kwargs)  # noqa: S603
             except Exception as e:  # noqa: BLE001
                 log.exception("Failed to launch VS Code")
                 _send_json(self, 500, {"error": f"failed to launch VS Code: {e}"})
@@ -243,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point (keeps ``main(argv) -> int`` for tests/embedders)."""
     try:
         rc = cli.main(args=list(argv) if argv is not None else None,
-                      prog_name="code-server", standalone_mode=False)
+                      prog_name="vscode-server", standalone_mode=False)
         return rc if isinstance(rc, int) else 0
     except click.exceptions.Exit as e:
         return e.exit_code
@@ -284,7 +290,7 @@ def _run(host, port, token, generate_token, code_binary, default_host, dry_run, 
         return 1
 
     bind = f"{config.host}:{httpd.server_port}"
-    log.info("code-server listening on %s (user=%s, dry_run=%s)", bind, user, config.dry_run)
+    log.info("vscode-server listening on %s (user=%s, dry_run=%s)", bind, user, config.dry_run)
     if config.token:
         log.info("Token auth enabled.")
     else:

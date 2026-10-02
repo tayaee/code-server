@@ -1,4 +1,4 @@
-"""Shared constants and helpers for code-server (listener) and launch-code (trigger)."""
+"""Shared constants and helpers for vscode-server (listener) and launch-vscode (trigger)."""
 
 from __future__ import annotations
 
