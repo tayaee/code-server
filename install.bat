@@ -1,9 +1,10 @@
 @echo off
-REM Re-install `remote-code` (and `vscode-server`) when needed.
+REM Re-install `vslc` (and `vsls`) when needed.
+REM (`remote-code` is an alias of `vslc`; both are installed together.)
 REM Same rules as install.sh:
-REM   - uv missing            -^> install uv (via mise if present, else the official install.ps1)
-REM   - remote-code missing   -^> force install (uv tool install --force)
-REM   - remote-code ^= 7 days old -^> force install
+REM   - uv missing      -^> install uv (via mise if present, else the official install.ps1)
+REM   - vslc missing    -^> force install (uv tool install --force)
+REM   - vslc ^= 7 days old -^> force install
 REM   - --force given         -^> force install immediately
 REM Usage:
 REM   install.bat [--force^|-f] [--help^|-h]
@@ -11,8 +12,8 @@ REM   install.bat [--force^|-f] [--help^|-h]
 setlocal
 set "FORCE=0"
 set "STALE_DAYS=7"
-set "REPO=git+https://github.com/tayaee/vscode-server.git"
-set "PKG=vscode-server"
+set "REPO=git+https://github.com/tayaee/vscode-launcher.git"
+set "PKG=vscode-launcher"
 
 :parse_args
 if "%~1"=="" goto :args_done
@@ -74,24 +75,24 @@ exit /b 1
 REM exit 0 = needs install, exit 1 = fresh (skip).
 :needs_install
 if "%FORCE%"=="1" exit /b 0
-where remote-code >nul 2>nul
+where vslc >nul 2>nul
 if errorlevel 1 (
-  echo [install.bat] remote-code not found; will install. 1>&2
+  echo [install.bat] vslc not found; will install. 1>&2
   exit /b 0
 )
 set "RC="
-for /f "delims=" %%i in ('where remote-code 2^>nul') do if not defined RC set "RC=%%i"
+for /f "delims=" %%i in ('where vslc 2^>nul') do if not defined RC set "RC=%%i"
 if not defined RC (
-  echo [install.bat] cannot locate remote-code; will reinstall to be safe. 1>&2
+  echo [install.bat] cannot locate vslc; will reinstall to be safe. 1>&2
   exit /b 0
 )
 set "AGE="
 for /f "delims=" %%a in ('powershell -NoProfile -Command "& { $p='%RC%'; try { $age=((Get-Date)-(Get-Item -LiteralPath $p).LastWriteTime).TotalDays } catch { echo STALE; exit }; if ($age -ge %STALE_DAYS%) { echo STALE } else { echo FRESH } }" 2^>nul') do set "AGE=%%a"
 if "%AGE%"=="FRESH" (
-  echo [install.bat] remote-code is fresh; skipping ^(use --force to reinstall^). 1>&2
+  echo [install.bat] vslc is fresh; skipping ^(use --force to reinstall^). 1>&2
   exit /b 1
 )
-echo [install.bat] remote-code is stale ^(^>= %STALE_DAYS%d^); will reinstall. 1>&2
+echo [install.bat] vslc is stale ^(^>= %STALE_DAYS%d^); will reinstall. 1>&2
 exit /b 0
 
 :do_install
@@ -101,19 +102,29 @@ if errorlevel 1 (
   echo [install.bat] error: install failed. 1>&2
   exit /b 1
 )
-where remote-code >nul 2>nul
+where vslc >nul 2>nul
 if errorlevel 1 (
-  echo [install.bat] warning: install finished but 'remote-code' is not on PATH. 1>&2
+  echo [install.bat] warning: install finished but 'vslc' is not on PATH. 1>&2
   echo [install.bat] hint: open a new terminal. 1>&2
   exit /b 0
 )
 set "VER="
-for /f "delims=" %%v in ('remote-code --version 2^>^&1') do if not defined VER set "VER=%%v"
+for /f "delims=" %%v in ('vslc --version 2^>^&1') do if not defined VER set "VER=%%v"
 if defined VER (
   echo [install.bat] done: %VER% 1>&2
 ) else (
-  echo [install.bat] done: remote-code installed. 1>&2
+  echo [install.bat] done: vslc installed. 1>&2
 )
-echo + vscode-server --version
-vscode-server --version
+where remote-code >nul 2>nul
+if errorlevel 1 (
+  echo [install.bat] warning: alias 'remote-code' is not on PATH. 1>&2
+) else (
+  echo [install.bat] alias ok: remote-code installed. 1>&2
+)
+echo + vsls --version
+vsls --version
+echo + vslc --version
+vslc --version
+echo + remote-code --version
+remote-code --version
 exit /b 0

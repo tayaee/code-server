@@ -1,4 +1,4 @@
-"""Shared constants and helpers for vscode-server (listener) and remote-code (trigger)."""
+"""Shared constants and helpers for vsls (listener) and vslc (trigger)."""
 
 from __future__ import annotations
 
@@ -11,15 +11,32 @@ DEFAULT_PORT = 8259
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_TIMEOUT = 10
 
-ENV_PORT = "CODE_SERVER_PORT"
-ENV_HOST = "CODE_SERVER_HOST"  # client: Windows machine address; server: bind address override
-ENV_TOKEN = "CODE_SERVER_TOKEN"
-ENV_SSH_HOST = "CODE_SSH_HOST"  # Remote-SSH Host alias as known on the Windows side
-ENV_SSH_HOST_ALT = "CODE_SERVER_SSH_HOST"
-ENV_CODE_BIN = "CODE_SERVER_BINARY"
-ENV_SSH_CONFIG = "CODE_SSH_CONFIG"  # override path to ssh config (default: ~/.ssh/config)
+ENV_PORT = "VSL_PORT"
+ENV_HOST = "VSL_HOST"  # client: Windows machine address; server: bind address override
+ENV_TOKEN = "VSL_TOKEN"
+ENV_SSH_HOST = "VSL_SSH_HOST"  # Remote-SSH Host alias as known on the Windows side
+ENV_SSH_HOST_ALT = "CODE_SSH_HOST"  # legacy alias (kept for backward compat)
+ENV_CODE_BIN = "VSL_BINARY"
+ENV_SSH_CONFIG = "VSL_SSH_CONFIG"  # override path to ssh config (default: ~/.ssh/config)
+
+# Legacy names from the vscode-server era (still accepted as fallback).
+LEGACY_ENV_PORT = "CODE_SERVER_PORT"
+LEGACY_ENV_HOST = "CODE_SERVER_HOST"
+LEGACY_ENV_TOKEN = "CODE_SERVER_TOKEN"
+LEGACY_ENV_SSH_HOST_ALT = "CODE_SERVER_SSH_HOST"
+LEGACY_ENV_CODE_BIN = "CODE_SERVER_BINARY"
+LEGACY_ENV_SSH_CONFIG = "CODE_SSH_CONFIG"  # override path to ssh config (default: ~/.ssh/config)
 
 LAUNCH_PATHS = ("/launch", "/open", "/")
+
+
+def _env_first(*names: str) -> str:
+    """Return the first non-empty env value among *names*, else ""."""
+    for name in names:
+        v = os.environ.get(name, "").strip()
+        if v:
+            return v
+    return ""
 
 
 def normalize_token(value: str | None) -> str | None:
@@ -58,7 +75,7 @@ def resolve_ssh_host(explicit: str | None, fallback_hostname: str | None = None)
     """Resolve which SSH host alias to use, or None if unknown."""
     if explicit and explicit.strip():
         return explicit.strip()
-    for env in (ENV_SSH_HOST, ENV_SSH_HOST_ALT):
+    for env in (ENV_SSH_HOST, ENV_SSH_HOST_ALT, LEGACY_ENV_SSH_HOST_ALT):
         v = os.environ.get(env, "").strip()
         if v:
             return v
@@ -108,7 +125,7 @@ def find_code_binary(explicit: str | None = None) -> str:
     candidates: list[str] = []
     if explicit:
         candidates.append(explicit)
-    env_bin = os.environ.get(ENV_CODE_BIN, "").strip()
+    env_bin = _env_first(ENV_CODE_BIN, LEGACY_ENV_CODE_BIN)
     if env_bin:
         candidates.append(env_bin)
     candidates += ["code", "code.cmd", "code.exe"]
@@ -138,7 +155,7 @@ def find_code_binary(explicit: str | None = None) -> str:
 
     raise FileNotFoundError(
         "VS Code CLI ('code') not found. Install VS Code and tick "
-        "'Add to PATH', or pass --code-binary / set CODE_SERVER_BINARY."
+        f"'Add to PATH', or pass --code-binary / set {ENV_CODE_BIN}."
     )
 
 
@@ -150,8 +167,8 @@ def local_hostname() -> str:
 
 
 def ssh_config_path() -> Path:
-    """Path to the ssh client config (override via $CODE_SSH_CONFIG)."""
-    override = os.environ.get(ENV_SSH_CONFIG, "").strip()
+    """Path to the ssh client config (override via $VSL_SSH_CONFIG)."""
+    override = _env_first(ENV_SSH_CONFIG, LEGACY_ENV_SSH_CONFIG)
     if override:
         return Path(override).expanduser()
     return Path.home() / ".ssh" / "config"

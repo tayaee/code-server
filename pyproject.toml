@@ -1,6 +1,6 @@
 [project]
-name = "vscode-server"
-version = "0.1.1"
+name = "vscode-launcher"
+version = "0.2.0"
 description = "Launch your local Windows VS Code onto a remote Linux directory over SSH via an HTTP trigger."
 readme = "README.md"
 license = { text = "MIT" }
@@ -25,20 +25,21 @@ classifiers = [
 dependencies = ["click>=8.1"]
 
 [project.urls]
-Homepage = "https://github.com/tayaee/vscode-server"
-Repository = "https://github.com/tayaee/vscode-server.git"
-Issues = "https://github.com/tayaee/vscode-server/issues"
+Homepage = "https://github.com/tayaee/vscode-launcher"
+Repository = "https://github.com/tayaee/vscode-launcher.git"
+Issues = "https://github.com/tayaee/vscode-launcher/issues"
 
 [project.scripts]
-vscode-server = "vscode_server.server:main"
-remote-code = "vscode_server.client:main"
+vsls = "vscode_launcher.server:main"
+vslc = "vscode_launcher.client:main"
+remote-code = "vscode_launcher.client:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/vscode_server"]
+packages = ["src/vscode_launcher"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [".git", ".github", "tests"]

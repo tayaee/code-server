@@ -1,14 +1,19 @@
-"""Linux-side trigger: tell your Windows box to open VS Code here.
+"""Linux-side trigger (vslc: vscode launcher client): tell your Windows
+box to open VS Code here.
 
-Run inside an active SSH session on the remote Linux machine:
+``remote-code`` is an alias of ``vslc`` (same function, old name kept
+for backward compat); all descriptions below use ``vslc``.
 
-    remote-code
-    remote-code --server 192.168.1.10 --ssh-host myserver
-    remote-code --path /home/user/project --token s3cret
+Run inside an active SSH session on the remote Linux machine (pairs with
+vsls, the vscode launcher server, on Windows):
+
+    vslc
+    vslc --server 192.168.1.10 --ssh-host myserver
+    vslc --path /home/user/project --token s3cret
 
 The server address defaults (in order) to:
   1. ``--server``
-  2. ``$CODE_SERVER_HOST``
+  2. ``$VSL_HOST`` (legacy ``$CODE_SERVER_HOST`` still accepted)
   3. client IP from ``$SSH_CLIENT`` / ``$SSH_CONNECTION``
   4. ``127.0.0.1`` (works with ``ssh -R 8259:localhost:8259`` reverse tunnel)
 
@@ -33,8 +38,13 @@ from . import __version__
 from .common import (
     DEFAULT_PORT,
     DEFAULT_TIMEOUT,
+    ENV_HOST,
     ENV_PORT,
+    ENV_SSH_HOST,
     ENV_TOKEN,
+    LEGACY_ENV_HOST,
+    LEGACY_ENV_PORT,
+    LEGACY_ENV_TOKEN,
     build_folder_uri,
     detect_client_ip,
     local_hostname,
@@ -47,17 +57,18 @@ from .common import (
 @click.argument("path", required=False, default=None)
 @click.option("--path", "path_opt", default=None,
               help="Same as positional PATH (explicit flag).")
-@click.option("--server", "--host", "server", default=None, envvar="CODE_SERVER_HOST",
+@click.option("--server", "--host", "server", default=None,
+              envvar=[ENV_HOST, LEGACY_ENV_HOST],
               help="Windows machine address (default: auto-detect from $SSH_CONNECTION / "
-                   "$SSH_CLIENT, else 127.0.0.1 for SSH -R tunnels; env CODE_SERVER_HOST).")
-@click.option("--port", type=int, default=DEFAULT_PORT, envvar=ENV_PORT, show_default=True,
-              help=f"vscode-server port (env {ENV_PORT}).")
-@click.option("--token", default=None, envvar=ENV_TOKEN,
+                   f"$SSH_CLIENT, else 127.0.0.1 for SSH -R tunnels; env {ENV_HOST}).")
+@click.option("--port", type=int, default=DEFAULT_PORT, envvar=[ENV_PORT, LEGACY_ENV_PORT],
+              show_default=True, help=f"vsls port (env {ENV_PORT}).")
+@click.option("--token", default=None, envvar=[ENV_TOKEN, LEGACY_ENV_TOKEN],
               help=f"Optional shared secret, only needed when the server was started "
                    f"with one (env {ENV_TOKEN}). Omit to send no token.")
 @click.option("--ssh-host", default=None,
               help="Remote-SSH Host alias as configured on Windows "
-                   "(default: $CODE_SSH_HOST or local hostname).")
+                   f"(default: ${ENV_SSH_HOST} or local hostname).")
 @click.option("--timeout", type=float, default=DEFAULT_TIMEOUT, show_default=True,
               help="HTTP timeout in seconds.")
 @click.option("--dry-run", is_flag=True,
@@ -65,7 +76,7 @@ from .common import (
 @click.option("--verbose", is_flag=True, help="Verbose output.")
 @click.version_option(__version__, "-v", "--version", message="%(version)s")
 def cli(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbose) -> int:
-    """Trigger the Windows vscode-server listener to open VS Code here."""
+    """Trigger the Windows vsls listener to open VS Code here."""
     return _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbose)
 
 
@@ -112,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point (keeps ``main(argv) -> int`` for tests/embedders)."""
     try:
         rc = cli.main(args=list(argv) if argv is not None else None,
-                      prog_name="remote-code", standalone_mode=False)
+                      prog_name="vslc", standalone_mode=False)
         return rc if isinstance(rc, int) else 0
     except click.exceptions.Exit as e:
         return e.exit_code
@@ -130,10 +141,10 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
         if auto_ip:
             server = auto_ip
             if verbose:
-                print(f"[remote-code] auto-detected Windows host {server} from SSH env", file=sys.stderr)
+                print(f"[vslc] auto-detected Windows host {server} from SSH env", file=sys.stderr)
         else:
             server = "127.0.0.1"
-            print("[remote-code] warning: not in an SSH session and --server not given; "
+            print("[vslc] warning: not in an SSH session and --server not given; "
                    "trying 127.0.0.1 (works with `ssh -R 8259:localhost:8259`).",
                   file=sys.stderr)
 
@@ -144,23 +155,23 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
     hostname = local_hostname()
     ssh_host = resolve_ssh_host(ssh_host, hostname)
     if not ssh_host:
-        print("[remote-code] error: cannot determine SSH host alias. "
-              "Pass --ssh-host <Remote-SSH Host> or set $CODE_SSH_HOST.", file=sys.stderr)
+        print("[vslc] error: cannot determine SSH host alias. "
+              f"Pass --ssh-host <Remote-SSH Host> or set ${ENV_SSH_HOST}.", file=sys.stderr)
         return 2
 
     try:
         preview_uri = build_folder_uri(ssh_host, target_dir)
     except ValueError as e:
-        print(f"[remote-code] error: {e}", file=sys.stderr)
+        print(f"[vslc] error: {e}", file=sys.stderr)
         return 2
 
     payload = {"path": target_dir, "host": ssh_host, "hostname": hostname, "user": user}
 
     if verbose or dry_run:
-        print(f"[remote-code] payload: {json.dumps(payload)}", file=sys.stderr)
-        print(f"[remote-code] will open: {preview_uri}", file=sys.stderr)
+        print(f"[vslc] payload: {json.dumps(payload)}", file=sys.stderr)
+        print(f"[vslc] will open: {preview_uri}", file=sys.stderr)
     if dry_run:
-        print(f"[remote-code] POST http://{server}:{port}/launch", file=sys.stderr)
+        print(f"[vslc] POST http://{server}:{port}/launch", file=sys.stderr)
         return 0
 
     body = json.dumps(payload).encode("utf-8")
@@ -180,11 +191,11 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
             probe_timeout = min(1.0, timeout) if timeout > 0 else 0.5
             if not _is_port_listening(candidate, port, timeout=probe_timeout):
                 break  # nothing listening locally; report the primary failure.
-            print(f"[remote-code] info: {candidates[0]}:{port} not directly reachable, "
+            print(f"[vslc] info: {candidates[0]}:{port} not directly reachable, "
                   f"trying {candidate}:{port} via ssh -R tunnel",
                   file=sys.stderr)
         if verbose:
-            print(f"[remote-code] POST {url}", file=sys.stderr)
+            print(f"[vslc] POST {url}", file=sys.stderr)
         try:
             raw, status = _post_launch(url, body, token, timeout)
             server = candidate  # actual endpoint used, shown in final log.
@@ -195,31 +206,31 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
                 detail = e.read().decode("utf-8", "replace")
             except Exception:  # noqa: BLE001
                 detail = ""
-            print(f"[remote-code] server rejected request at {url}: "
+            print(f"[vslc] server rejected request at {url}: "
                   f"HTTP {e.code} {detail}", file=sys.stderr)
             if e.code == 401:
-                print("[remote-code] hint: token mismatch. Match --token with the server's --token.",
+                print("[vslc] hint: token mismatch. Match --token with the server's --token.",
                       file=sys.stderr)
             elif e.code == 400:
-                print("[remote-code] hint: try --ssh-host <Remote-SSH Host alias from Windows ssh config>.",
+                print("[vslc] hint: try --ssh-host <Remote-SSH Host alias from Windows ssh config>.",
                       file=sys.stderr)
             return 1
         except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as e:
             last_error = e
             reason = getattr(e, "reason", e) if isinstance(e, urllib.error.URLError) else e
-            print(f"[remote-code] cannot reach vscode-server at {url}: {reason}", file=sys.stderr)
+            print(f"[vslc] cannot reach vsls at {url}: {reason}", file=sys.stderr)
             continue
 
     if last_error is not None:
         url = f"http://{server}:{port}/launch"
-        print("[remote-code] hints:", file=sys.stderr)
-        print("  1. Is `vscode-server` running on Windows? (vscode-server --host 0.0.0.0)", file=sys.stderr)
+        print("[vslc] hints:", file=sys.stderr)
+        print("  1. Is `vsls` running on Windows? (vsls --host 0.0.0.0)", file=sys.stderr)
         print("  2. Windows firewall allowing inbound TCP on the port?", file=sys.stderr)
-        print(f"     PowerShell (admin): New-NetFirewallRule -DisplayName vscode-server "
+        print(f"     PowerShell (admin): New-NetFirewallRule -DisplayName vsls "
               f"-Direction Inbound -LocalPort {port} -Protocol TCP -Action Allow", file=sys.stderr)
         print("  3. No direct LAN route? Use a reverse tunnel from Windows:", file=sys.stderr)
         print(f"     ssh -R {port}:localhost:{port} user@remote", file=sys.stderr)
-        print("     then: remote-code --server 127.0.0.1", file=sys.stderr)
+        print("     then: vslc --server 127.0.0.1", file=sys.stderr)
         if not auto_ip:
             print("  4. $SSH_CLIENT/$SSH_CONNECTION empty: you may be in tmux/screen; "
                   "pass --server explicitly.", file=sys.stderr)
@@ -234,12 +245,12 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
         print(f"Connecting to {server}:{port} to run [code --folder-uri {uri}]")
         if isinstance(data, dict):
             if data.get("ssh_config") == "added":
-                print(f"[remote-code] ssh config updated: log in as '{data.get('ssh_user')}'.",
+                print(f"[vslc] ssh config updated: log in as '{data.get('ssh_user')}'.",
                       file=sys.stderr)
             elif data.get("warning"):
-                print(f"[remote-code] warning: {data['warning']}", file=sys.stderr)
+                print(f"[vslc] warning: {data['warning']}", file=sys.stderr)
         return 0
-    print(f"[remote-code] unexpected status HTTP {status}: {raw}", file=sys.stderr)
+    print(f"[vslc] unexpected status HTTP {status}: {raw}", file=sys.stderr)
     return 1
 
 

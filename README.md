@@ -1,6 +1,8 @@
-# vscode-server
+# vscode-launcher
 
-Want to run VS Code for a repository right from your terminal SSH session? Yes, you can do it with `vscode-server` and `remote-code`.
+Want to run VS Code for a repository right from your terminal SSH session? Yes, you can do it with `vsls` and `vslc`.
+
+> `remote-code` is an alias of `vslc` (same function); all descriptions below use `vslc`.
 
 ## Install
 
@@ -8,16 +10,16 @@ Want to run VS Code for a repository right from your terminal SSH session? Yes, 
 ```
 c:\> powershell -ExecutionPolicy Bypass -c "iwr https://astral.sh/uv/install.ps1 -useb | iex"
 c:\> uv --version
-c:\> uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
-c:\> vscode-server --version
+c:\> uv tool install --from git+https://github.com/tayaee/vscode-launcher.git --force vscode-launcher
+c:\> vsls --version
 ```
 
 **Linux:**
 ```
 $ curl -LsSf https://astral.sh/uv/install.sh | sh
 $ uv --version
-$ uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
-$ remote-code --version
+$ uv tool install --from git+https://github.com/tayaee/vscode-launcher.git --force vscode-launcher
+$ vslc --version
 ```
 
 ## SSH config (Windows side)
@@ -49,42 +51,42 @@ Same office / home LAN, where the Linux box can reach `http://<Windows IP>:8259`
 
 **Windows:**
 ```
-c:\> vscode-server
+c:\> vsls
 ```
 
 **Then, from the Linux SSH session:**
 ```
-$ remote-code
+$ vslc
 ```
 
 Not working? See [1], [2], [3], [5] below.
 
 ## Use case 2: Home -> Cloud (port 8259 unreachable, reverse tunnel required)
 
-Cloud VM (OCI / AWS / etc.) cannot dial back to your home Windows PC (NAT / firewall). Open a reverse tunnel from Windows so the cloud box can reach `vscode-server` via localhost.
+Cloud VM (OCI / AWS / etc.) cannot dial back to your home Windows PC (NAT / firewall). Open a reverse tunnel from Windows so the cloud box can reach `vsls` via localhost.
 
 **Windows:**
 ```
-c:\> vscode-server
+c:\> vsls
 c:\> ssh <linux-hostname>
 ```
 
 **Linux (cloud, inside the tunneled SSH session):**
 ```
-$ remote-code
+$ vslc
 ```
 
 Not working? See [2], [3], [4], [5] below.
-`remote-code` tries `<Windows-IP>:8259` first and falls back to `127.0.0.1:8259` when it is listening.
+`vslc` tries `<Windows-IP>:8259` first and falls back to `127.0.0.1:8259` when it is listening.
 
 ## Troubleshooting
 
-### [1] Linux -> Windows: is vscode-server reachable?
+### [1] Linux -> Windows: is vsls reachable?
 
 ```bash
 Linux $ nc -zv -w 3 <Windows-IP> 8259
 # expect: Connection to <Windows-IP> 8259 port [tcp/*] succeeded!
-# fail -> vscode-server not running / Windows firewall / wrong IP
+# fail -> vsls not running / Windows firewall / wrong IP
 ```
 
 ### [2] Windows -> Linux: does SSH work without a password?
@@ -119,8 +121,8 @@ $ ss -tnlp4 | grep 8259
 
 ### [5] SSH host alias mismatch?
 
-`remote-code` picks the alias in this order: `--ssh-host` > `$CODE_SSH_HOST` > local hostname. If the Linux hostname is not the alias, pass it explicitly:
+`vslc` picks the alias in this order: `--ssh-host` > `$VSL_SSH_HOST` > local hostname. If the Linux hostname is not the alias, pass it explicitly:
 
 ```
-Linux $ remote-code --ssh-host <linux-hostname>
+Linux $ vslc --ssh-host <linux-hostname>
 ```

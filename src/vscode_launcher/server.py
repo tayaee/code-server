@@ -1,19 +1,21 @@
-"""Windows-side daemon: listens for HTTP triggers and opens local VS Code.
+"""Windows-side daemon (vsls: vscode launcher server): listens for HTTP triggers
+and opens local VS Code.
 
 Run on your Windows machine:
 
-    vscode-server --port 8259 --token s3cret
+    vsls --port 8259 --token s3cret
 
 Then from the remote Linux box (inside SSH):
 
-    remote-code --server <windows-ip>
+    vslc --server <windows-ip>
 
 Protocol (JSON over HTTP):
     POST /launch  {"path": "/home/user/proj", "host": "myserver", ...}
     -> launches ``code --folder-uri vscode-remote://ssh-remote+myserver/home/user/proj``
 
 Auth: if the server was started with a token, the client must send
-``Authorization: Bearer <token>`` or ``X-Vscode-Server-Token: <token>``.
+``Authorization: Bearer <token>`` or ``X-Vsl-Token: <token>``.
+(``X-Vscode-Server-Token`` is still accepted for backward compat.)
 """
 
 from __future__ import annotations
@@ -40,13 +42,17 @@ from .common import (
     ENV_PORT,
     ENV_TOKEN,
     LAUNCH_PATHS,
+    LEGACY_ENV_CODE_BIN,
+    LEGACY_ENV_HOST,
+    LEGACY_ENV_PORT,
+    LEGACY_ENV_TOKEN,
     build_folder_uri,
     ensure_ssh_user,
     find_code_binary,
     normalize_token,
 )
 
-log = logging.getLogger("vscode-server")
+log = logging.getLogger("vsls")
 
 MAX_BODY_BYTES = 64 * 1024
 
@@ -79,6 +85,9 @@ def _check_auth(handler: BaseHTTPRequestHandler, token: str | None) -> bool:
         presented = auth[len("Bearer "):].strip()
         if secrets.compare_digest(presented, token):
             return True
+    presented = handler.headers.get("X-Vsl-Token", "").strip()
+    if presented and secrets.compare_digest(presented, token):
+        return True
     presented = handler.headers.get("X-Vscode-Server-Token", "").strip()
     if presented and secrets.compare_digest(presented, token):
         return True
@@ -96,7 +105,7 @@ def _send_json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> N
 
 def make_handler(config: ServerConfig):
     class LaunchHandler(BaseHTTPRequestHandler):
-        server_version = "vscode-server/0.1.0"
+        server_version = f"vsls/{__version__}"
 
         def log_message(self, fmt, *args):  # noqa: N802 - stdlib signature
             log.info("%s - %s", self.address_string(), fmt % args)
@@ -107,13 +116,13 @@ def make_handler(config: ServerConfig):
         def do_GET(self):  # noqa: N802
             route = self._route()
             if route == "/health":
-                _send_json(self, 200, {"status": "ok", "service": "vscode-server"})
+                _send_json(self, 200, {"status": "ok", "service": "vsls"})
             elif route in ("/", "/launch", "/open"):
                 _send_json(
                     self,
                     200,
                     {
-                        "service": "vscode-server",
+                        "service": "vsls",
                         "usage": "POST /launch with JSON {path, host}",
                         "example": {
                             "path": "/home/user/project",
@@ -223,16 +232,16 @@ def make_handler(config: ServerConfig):
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
-@click.option("--host", default=DEFAULT_HOST, envvar=ENV_HOST, show_default=True,
-              help=f"Bind address (env {ENV_HOST}).")
-@click.option("--port", type=int, default=DEFAULT_PORT, envvar=ENV_PORT, show_default=True,
-              help=f"Listen port (env {ENV_PORT}).")
-@click.option("--token", default=None, envvar=ENV_TOKEN,
+@click.option("--host", default=DEFAULT_HOST, envvar=[ENV_HOST, LEGACY_ENV_HOST],
+              show_default=True, help=f"Bind address (env {ENV_HOST}).")
+@click.option("--port", type=int, default=DEFAULT_PORT, envvar=[ENV_PORT, LEGACY_ENV_PORT],
+              show_default=True, help=f"Listen port (env {ENV_PORT}).")
+@click.option("--token", default=None, envvar=[ENV_TOKEN, LEGACY_ENV_TOKEN],
               help=f"Optional shared secret (env {ENV_TOKEN}). "
                    "If set, client must present it; if omitted, all requests are accepted.")
 @click.option("--generate-token", is_flag=True,
               help="Print a random token and exit (use it for --token).")
-@click.option("--code-binary", default=None, envvar=ENV_CODE_BIN,
+@click.option("--code-binary", default=None, envvar=[ENV_CODE_BIN, LEGACY_ENV_CODE_BIN],
               help=f"Path to VS Code CLI (default: auto-detect; env {ENV_CODE_BIN}).")
 @click.option("--default-host", default=None,
               help="Default Remote-SSH Host alias when the trigger omits 'host'.")
@@ -249,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point (keeps ``main(argv) -> int`` for tests/embedders)."""
     try:
         rc = cli.main(args=list(argv) if argv is not None else None,
-                      prog_name="vscode-server", standalone_mode=False)
+                      prog_name="vsls", standalone_mode=False)
         return rc if isinstance(rc, int) else 0
     except click.exceptions.Exit as e:
         return e.exit_code
@@ -290,7 +299,7 @@ def _run(host, port, token, generate_token, code_binary, default_host, dry_run, 
         return 1
 
     bind = f"{config.host}:{httpd.server_port}"
-    log.info("vscode-server listening on %s (user=%s, dry_run=%s)", bind, user, config.dry_run)
+    log.info("vsls listening on %s (user=%s, dry_run=%s)", bind, user, config.dry_run)
     if config.token:
         log.info("Token auth enabled.")
     else:
