@@ -8,12 +8,14 @@ A tool to open remote Linux directories in your local Windows VS Code (no VS Cod
 
 **Windows:**
 ```
+c:\> powershell -ExecutionPolicy Bypass -c "iwr https://astral.sh/uv/install.ps1 -useb | iex"
 c:\> uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
 c:\> vscode-server --version
 ```
 
 **Linux:**
 ```
+$ curl -LsSf https://astral.sh/uv/install.sh | sh
 $ uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
 $ remote-code --version
 ```
