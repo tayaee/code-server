@@ -2,8 +2,6 @@
 
 Want to run VS Code for a repository right from your terminal SSH session? Yes, you can do it with `vscode-server` and `remote-code`.
 
-A tool to open remote Linux directories in your local Windows VS Code (no VS Code required on Linux).
-
 ## Install
 
 **Windows:**
@@ -22,7 +20,7 @@ $ remote-code --version
 
 ## SSH config (Windows side)
 
-Register the Linux hostname (the outcome of `hostname` command) in `%USERPROFILE%\.ssh\config`:
+Register the Linux hostname (the outcome of `hostname` command) in `%USERPROFILE%\.ssh\config`. See the [OpenBSD ssh_config manual](https://man.openbsd.org/ssh_config) and [VS Code Remote-SSH documentation](https://code.visualstudio.com/docs/remote/ssh) for syntax.
 
 **For LAN connection:**
 ```
@@ -31,17 +29,17 @@ Host <linux-hostname>
     User <linux-login-id>    
     RemoteForward 8259 127.0.0.1:8259
 ```
+Check the SSH connection with `ssh <linux-hostname>`.
 
 **For Cloud (AWS, Oracle Cloud) connection:**
 ```
 Host <linux-hostname>
     HostName <linux-ip>
     User <linux-login-id>
-    IdentityFile "<path-to-private-key-file>"
+    IdentityFile "<path\to\private-key-file>"
     RemoteForward 8259 127.0.0.1:8259
 ```
-
-See the [OpenBSD ssh_config manual](https://man.openbsd.org/ssh_config) and [VS Code Remote-SSH documentation](https://code.visualstudio.com/docs/remote/ssh) for syntax.
+Check the SSH connection with `ssh -i "<path\to\private-key-file>" <linux-hostname>`.
 
 ## Use case 1: Local LAN (port 8259 directly reachable)
 
@@ -75,7 +73,7 @@ $ remote-code
 ```
 
 Not working? See [2], [3], [4], [5] below.
-`remote-code` tries `<vscode-server-ip>:8259` first and falls back to `127.0.0.1:8259` when it is listening.
+`remote-code` tries `<Windows-IP>:8259` first and falls back to `127.0.0.1:8259` when it is listening.
 
 ## Troubleshooting
 
