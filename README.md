@@ -24,7 +24,7 @@ Linux $ remote-code --version
 
 ## SSH config (Windows side)
 
-Register the Linux hostname in `%USERPROFILE%\.ssh\config`:
+Register the Linux hostname (the outcome of `hostname` command) in `%USERPROFILE%\.ssh\config`:
 
 ### For LAN connection
 ```
