@@ -28,6 +28,7 @@ import secrets
 import shlex
 import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
@@ -59,6 +60,145 @@ from .common import (
 log = logging.getLogger("rvl-server")
 
 MAX_BODY_BYTES = 64 * 1024
+
+# Newly spawned VS Code may take a moment to appear in the process list.
+PID_DETECT_TIMEOUT = 5.0
+PID_DETECT_POLL = 0.3
+
+
+def list_vscode_pids() -> list[int]:
+    """Best-effort list of VS Code main-process PIDs on this machine.
+
+    Windows: ``Code.exe`` via ``tasklist`` (powershell fallback).
+    POSIX (dev/test): ``Code``/``code`` via ``pgrep`` (``ps`` fallback).
+    Returns [] when the list cannot be obtained. Never raises.
+    """
+    try:
+        if os.name == "nt":
+            return _list_vscode_pids_windows()
+        return _list_vscode_pids_posix()
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _list_vscode_pids_windows() -> list[int]:
+    import csv
+    import io
+
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq Code.exe", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001
+        out = None
+    if out is not None and out.returncode == 0 and out.stdout:
+        pids: list[int] = []
+        try:
+            for row in csv.reader(io.StringIO(out.stdout)):
+                if len(row) >= 2 and row[0].strip('" ').lower() == "code.exe":
+                    try:
+                        pids.append(int(row[1].strip('" ')))
+                    except ValueError:
+                        continue
+        except Exception:  # noqa: BLE001
+            pass
+        # tasklist prints INFO line when nothing matches -> pids stays empty.
+        # Empty here may mean "no Code.exe yet" OR parse failure; try
+        # powershell fallback only when parsing clearly failed (no rows at all
+        # and output doesn't look like a CSV). Keep it simple: if we got any
+        # CSV row (even non-Code) trust the result.
+        if pids or "code.exe" in out.stdout.lower():
+            return sorted(pids)
+    # Fallback: powershell Get-Process.
+    try:
+        ps = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-Process Code -ErrorAction SilentlyContinue | "
+             "Select-Object -ExpandProperty Id"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        pids = []
+        if ps.returncode == 0:
+            for line in (ps.stdout or "").splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    pids.append(int(line))
+            return sorted(pids)
+    except Exception:  # noqa: BLE001
+        pass
+    return []
+
+
+def _list_vscode_pids_posix() -> list[int]:
+    for cmd in (["pgrep", "-x", "Code"], ["pgrep", "-x", "code"]):
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=False)
+        except Exception:  # noqa: BLE001
+            continue
+        if out.returncode == 0 and out.stdout:
+            pids = [int(x) for x in out.stdout.split() if x.strip().isdigit()]
+            if pids:
+                return sorted(pids)
+    try:
+        out = subprocess.run(
+            ["ps", "-eo", "pid,comm"], capture_output=True, text=True, timeout=5, check=False
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    if out.returncode != 0:
+        return []
+    pids = []
+    for line in (out.stdout or "").splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] in ("Code", "code", "Code.exe"):
+            try:
+                pids.append(int(parts[0]))
+            except ValueError:
+                continue
+    return sorted(pids)
+
+
+def detect_new_vscode_pids(before: set[int], timeout: float = PID_DETECT_TIMEOUT) -> list[int]:
+    """Poll the process list until new VS Code PID(s) appear.
+
+    Returns the sorted before/after diff (possibly empty on timeout).
+    The caller snapshots *before* launching, then calls this after.
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    found: list[int] = []
+    while True:
+        try:
+            after = set(list_vscode_pids())
+        except Exception:  # noqa: BLE001
+            after = set()
+        new = sorted(after - set(before))
+        if new:
+            found = new
+            # One extra short poll to catch sibling processes spawning together.
+            try:
+                time.sleep(min(PID_DETECT_POLL, max(0.0, deadline - time.monotonic())))
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                after2 = set(list_vscode_pids())
+            except Exception:  # noqa: BLE001
+                break
+            found = sorted(after2 - set(before)) or found
+            break
+        if time.monotonic() >= deadline:
+            break
+        try:
+            time.sleep(PID_DETECT_POLL)
+        except Exception:  # noqa: BLE001
+            break
+    return found
 
 
 class ServerConfig:
@@ -222,18 +362,48 @@ def make_handler(config: ServerConfig):
                 # VS Code process outlives the handler thread.
                 cmd = [code_bin, "--folder-uri", uri]
                 log.info("Executing for %s:%d: %s", *self.client_address[:2], shlex.join(cmd))
+                try:
+                    pids_before = set(list_vscode_pids())
+                except Exception:  # noqa: BLE001
+                    pids_before = set()
                 kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
                 if os.name == "nt":
                     kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0)  # type: ignore[attr-defined]
                 else:
                     kwargs["start_new_session"] = True
-                subprocess.Popen(cmd, **kwargs)  # noqa: S603
+                proc = subprocess.Popen(cmd, **kwargs)  # noqa: S603
+                launcher_pid: int | None = proc.pid
             except Exception as e:  # noqa: BLE001
                 log.exception("Failed to launch VS Code")
                 _send_json(self, 500, {"error": f"failed to launch VS Code: {e}"})
                 return
 
-            _send_json(self, 200, {"status": "launched", "uri": uri, **ssh_result})
+            # The `code` CLI wrapper usually exits quickly, so its PID is not
+            # the VS Code window PID. Estimate the real PID(s) with a
+            # before/after diff of the Code.exe process list.
+            try:
+                new_pids = detect_new_vscode_pids(pids_before)
+            except Exception:  # noqa: BLE001
+                log.warning("PID detection failed", exc_info=True)
+                new_pids = []
+            log.info("VS Code launch: launcher_pid=%s new_pids=%s", launcher_pid, new_pids)
+            if new_pids:
+                pid: int | None = new_pids[0]
+                pid_confidence = "estimated"
+            elif launcher_pid is not None:
+                pid = launcher_pid
+                pid_confidence = "launcher"
+            else:
+                pid = None
+                pid_confidence = "unknown"
+            pid_info = {
+                "launcher_pid": launcher_pid,
+                "vscode_pids": new_pids,
+                "pid": pid,
+                "pid_confidence": pid_confidence,
+            }
+
+            _send_json(self, 200, {"status": "launched", "uri": uri, **ssh_result, **pid_info})
 
     return LaunchHandler
 
