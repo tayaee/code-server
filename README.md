@@ -7,6 +7,7 @@ Want to run VS Code for a repository right from your terminal SSH session? Yes, 
 **Windows:**
 ```
 c:\> powershell -ExecutionPolicy Bypass -c "iwr https://astral.sh/uv/install.ps1 -useb | iex"
+c:\> uv --version
 c:\> uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
 c:\> vscode-server --version
 ```
@@ -14,6 +15,7 @@ c:\> vscode-server --version
 **Linux:**
 ```
 $ curl -LsSf https://astral.sh/uv/install.sh | sh
+$ uv --version
 $ uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
 $ remote-code --version
 ```
