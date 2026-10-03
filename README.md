@@ -24,10 +24,10 @@ Linux $ remote-code --version
 
 ## SSH config (Windows side)
 
-VS Code Remote-SSH connects by **<linux-host-alias>**, not by raw IP. Register the alias once in `%USERPROFILE%\.ssh\config`:
+VS Code Remote-SSH connects by **<linux-hostname>**, not by raw IP. Register the alias once in `%USERPROFILE%\.ssh\config`:
 
 ```
-Host <linux-host-alias>
+Host <linux-hostname>
     HostName <linux-ip>
     User <linux-login-id>
     IdentityFile "<path-to-private-key-file>"
@@ -63,7 +63,7 @@ Cloud VM (OCI / AWS / etc.) cannot dial back to your home Windows PC (NAT / fire
 Windows % vscode-server
 
 # Windows (another terminal, requires RemoteForward in ssh config above):
-Windows % ssh <linux-host-alias>
+Windows % ssh <linux-hostname>
 
 # Linux (cloud, inside the tunneled SSH session):
 Linux $ remote-code
@@ -85,7 +85,7 @@ Linux $ nc -zv -w 3 <Windows-IP> 8259
 ### [2] Windows -> Linux: does SSH work without a password?
 
 ```powershell
-Windows % ssh <linux-host-alias> "echo ssh-ok"
+Windows % ssh <linux-hostname> "echo ssh-ok"
 # expect: ssh-ok (no password prompt)
 # fail -> HostName / User / IdentityFile / key registration wrong
 ```
@@ -93,13 +93,13 @@ Windows % ssh <linux-host-alias> "echo ssh-ok"
 For scripting / BatchMode check (fails instead of prompting):
 
 ```powershell
-Windows % ssh -o BatchMode=yes <linux-host-alias> "echo ssh-ok"
+Windows % ssh -o BatchMode=yes <linux-hostname> "echo ssh-ok"
 ```
 
 ### [3] Windows -> Linux: does VS Code Remote-SSH open?
 
 ```powershell
-Windows % code --folder-uri "vscode-remote://ssh-remote+<linux-host-alias>/home/user1/src/demo"
+Windows % code --folder-uri "vscode-remote://ssh-remote+<linux-hostname>/home/user1/src/demo"
 # expect: a VS Code window opens on that folder (close it after the test)
 # fail -> Host alias / User / Remote-SSH extension wrong
 ```
@@ -117,5 +117,5 @@ Linux $ ss -tnlp4 | grep 8259
 `remote-code` picks the alias in this order: `--ssh-host` > `$CODE_SSH_HOST` > local hostname. If the Linux hostname is not the alias, pass it explicitly:
 
 ```
-Linux $ remote-code --ssh-host <linux-host-alias>
+Linux $ remote-code --ssh-host <linux-hostname>
 ```
