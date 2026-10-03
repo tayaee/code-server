@@ -6,17 +6,17 @@ from http.server import ThreadingHTTPServer
 
 import click
 
-from vscode_launcher.client import cli as client_cli
-from vscode_launcher.client import main as client_main
-from vscode_launcher.server import cli as server_cli
-from vscode_launcher.server import main as server_main
-from vscode_launcher.common import (
+from remote_vscode_launcher.client import cli as client_cli
+from remote_vscode_launcher.client import main as client_main
+from remote_vscode_launcher.server import cli as server_cli
+from remote_vscode_launcher.server import main as server_main
+from remote_vscode_launcher.common import (
     build_folder_uri,
     detect_client_ip,
     ensure_ssh_user,
     normalize_token,
 )
-from vscode_launcher.server import make_handler, ServerConfig
+from remote_vscode_launcher.server import make_handler, ServerConfig
 
 
 def _post(port, body, token=None):
@@ -46,7 +46,7 @@ def test_client_parser_defaults():
 
 
 def test_client_version(capsys):
-    from vscode_launcher import __version__
+    from remote_vscode_launcher import __version__
     assert __version__ == "0.2.0"
     assert client_main(["--version"]) == 0
     assert capsys.readouterr().out.strip() == __version__
@@ -166,8 +166,22 @@ def test_detect_client_ip_ipv6(monkeypatch):
     assert detect_client_ip() == "fd00::1"
 
 
-def test_code_server_host_env_is_used(monkeypatch, capsys):
+def test_rvl_host_env_is_used(monkeypatch, capsys):
     # Nested SSH scenario: explicit origin propagated via SendEnv/AcceptEnv.
+    for var in ("RVL_HOST", "RVL_SSH_HOST", "VSL_HOST", "VSL_SSH_HOST",
+                "CODE_SERVER_HOST", "CODE_SSH_HOST", "CODE_SERVER_SSH_HOST"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("RVL_HOST", "10.9.9.9")
+    monkeypatch.setenv("RVL_SSH_HOST", "h")
+    assert client_main(["--dry-run"]) == 0
+    assert "http://10.9.9.9:8259/launch" in capsys.readouterr().err
+
+
+def test_vsl_legacy_env_still_accepted(monkeypatch, capsys):
+    # Backward compat with the vsl era names.
+    for var in ("RVL_HOST", "RVL_SSH_HOST", "VSL_HOST", "VSL_SSH_HOST",
+                "CODE_SERVER_HOST", "CODE_SSH_HOST", "CODE_SERVER_SSH_HOST"):
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("VSL_HOST", "10.9.9.9")
     monkeypatch.setenv("VSL_SSH_HOST", "h")
     assert client_main(["--dry-run"]) == 0
@@ -176,6 +190,9 @@ def test_code_server_host_env_is_used(monkeypatch, capsys):
 
 def test_legacy_env_still_accepted(monkeypatch, capsys):
     # Backward compat with the vscode-server era names.
+    for var in ("RVL_HOST", "RVL_SSH_HOST", "VSL_HOST", "VSL_SSH_HOST",
+                "CODE_SERVER_HOST", "CODE_SSH_HOST", "CODE_SERVER_SSH_HOST"):
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("CODE_SERVER_HOST", "10.9.9.9")
     monkeypatch.setenv("CODE_SSH_HOST", "h")
     assert client_main(["--dry-run"]) == 0
@@ -183,8 +200,11 @@ def test_legacy_env_still_accepted(monkeypatch, capsys):
 
 
 def test_explicit_server_beats_env(monkeypatch, capsys):
-    monkeypatch.setenv("VSL_HOST", "10.9.9.9")
-    monkeypatch.setenv("VSL_SSH_HOST", "h")
+    for var in ("RVL_HOST", "RVL_SSH_HOST", "VSL_HOST", "VSL_SSH_HOST",
+                "CODE_SERVER_HOST", "CODE_SSH_HOST", "CODE_SERVER_SSH_HOST"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("RVL_HOST", "10.9.9.9")
+    monkeypatch.setenv("RVL_SSH_HOST", "h")
     assert client_main(["--dry-run", "--server", "192.168.0.1"]) == 0
     err = capsys.readouterr().err
     assert "http://192.168.0.1:8259/launch" in err
@@ -243,7 +263,7 @@ def test_server_reports_ssh_user_handling(monkeypatch, tmp_path):
     # Linux id differs -> server inserts User into Windows ssh config.
     cfg = tmp_path / "config"
     cfg.write_text("Host h\n    HostName 10.0.0.1\n", encoding="utf-8")
-    monkeypatch.setenv("VSL_SSH_CONFIG", str(cfg))
+    monkeypatch.setenv("RVL_SSH_CONFIG", str(cfg))
     config = ServerConfig(host="127.0.0.1", port=0, token=None, dry_run=True)
     httpd = ThreadingHTTPServer((config.host, config.port), make_handler(config))
     port = httpd.server_address[1]

@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Re-install `vslc` (and `vsls`) when needed.
-# (`remote-code` is an alias of `vslc`; both are installed together.)
+# Re-install `rvl` (and `rvl-server`) when needed.
 #
 # Rules:
 #   - uv missing  -> install uv (via mise if present, else curl)
-#   - vslc miss   -> force install (uv tool install --force)
-#   - vslc >= 7 days old -> force install
+#   - rvl miss    -> force install (uv tool install --force)
+#   - rvl >= 7 days old -> force install
 #   - --force given     -> force install immediately
 #
 # Usage:
@@ -17,8 +16,8 @@ set -euo pipefail
 
 FORCE=0
 STALE_DAYS=7
-REPO="git+https://github.com/tayaee/vscode-launcher.git"
-PKG="vscode-launcher"
+REPO="git+https://github.com/tayaee/remote-vscode-launcher.git"
+PKG="remote-vscode-launcher"
 
 log() { echo "[install.sh] $*" >&2; }
 
@@ -76,14 +75,14 @@ ensure_uv() {
 }
 
 # 0 = needs install, 1 = fresh (skip).
-vslc_needs_install() {
+rvl_needs_install() {
     if [ "$FORCE" -eq 1 ]; then
         return 0
     fi
     local bin
-    bin="$(command -v vslc 2>/dev/null || true)"
+    bin="$(command -v rvl 2>/dev/null || true)"
     if [ -z "${bin:-}" ] || [ ! -e "$bin" ]; then
-        log "vslc not found; will install."
+        log "rvl not found; will install."
         return 0
     fi
     local mtime now age limit
@@ -92,13 +91,13 @@ vslc_needs_install() {
         age=$((now - mtime))
         limit=$((STALE_DAYS * 86400))
         if [ "$age" -ge "$limit" ]; then
-            log "vslc is $((age / 86400)) days old (>= ${STALE_DAYS}d); will reinstall."
+            log "rvl is $((age / 86400)) days old (>= ${STALE_DAYS}d); will reinstall."
             return 0
         fi
-        log "vslc is fresh ($((age / 3600))h old); skipping (use --force to reinstall)."
+        log "rvl is fresh ($((age / 3600))h old); skipping (use --force to reinstall)."
         return 1
     fi
-    log "cannot stat vslc; will reinstall to be safe."
+    log "cannot stat rvl; will reinstall to be safe."
     return 0
 }
 
@@ -108,26 +107,26 @@ do_install() {
     uv tool install --from "$REPO" --force "$PKG"
     ensure_local_path
     hash -r 2>/dev/null || true
-    if command -v vslc >/dev/null 2>&1; then
-        log "done: $(vslc --version 2>&1 || echo 'vslc installed')"
+    if command -v rvl >/dev/null 2>&1; then
+        log "done: $(rvl --version 2>&1 || echo 'rvl installed')"
     else
-        log "warning: install finished but 'vslc' is not on PATH."
+        log "warning: install finished but 'rvl' is not on PATH."
         log "hint: export PATH=\"\$HOME/.local/bin:\$PATH\" (or reopen the shell)."
     fi
-    if command -v remote-code >/dev/null 2>&1; then
-        log "alias ok: $(remote-code --version 2>&1 || echo 'remote-code installed')"
+    if command -v rvl-server >/dev/null 2>&1; then
+        log "server ok: $(rvl-server --version 2>&1 || echo 'rvl-server installed')"
     else
-        log "warning: alias 'remote-code' is not on PATH."
+        log "warning: 'rvl-server' is not on PATH."
     fi
 }
 
 main() {
     ensure_uv
-    if vslc_needs_install; then
+    if rvl_needs_install; then
         do_install
     fi
 }
 
 main
-(set -x; vslc --version)
-(set -x; remote-code --version)
+(set -x; rvl --version)
+(set -x; rvl-server --version)
