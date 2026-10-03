@@ -24,8 +24,17 @@ Linux $ remote-code --version
 
 ## SSH config (Windows side)
 
-VS Code Remote-SSH connects by **<linux-hostname>**, not by raw IP. Register the alias once in `%USERPROFILE%\.ssh\config`:
+Register the Linux hostname in `%USERPROFILE%\.ssh\config`:
 
+### For LAN connection
+```
+Host <linux-hostname>
+    HostName <linux-ip>
+    User <linux-login-id>    
+    RemoteForward 8259 127.0.0.1:8259
+```
+
+### For Cloud (AWS, Oracle Cloud) connection
 ```
 Host <linux-hostname>
     HostName <linux-ip>
