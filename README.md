@@ -6,27 +6,23 @@ A tool to open remote Linux directories in your local Windows VS Code (no VS Cod
 
 ## Install
 
-### Windows
-
+**Windows:**
 ```
-Windows % uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
-Windows % vscode-server --version
+c:\> uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
+c:\> vscode-server --version
 ```
 
-### Linux
-
-Log in via SSH to install / upgrade (same command):
-
+**Linux:**
 ```
-Linux $ uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
-Linux $ remote-code --version
+$ uv tool install --from git+https://github.com/tayaee/vscode-server.git --force vscode-server
+$ remote-code --version
 ```
 
 ## SSH config (Windows side)
 
 Register the Linux hostname (the outcome of `hostname` command) in `%USERPROFILE%\.ssh\config`:
 
-### For LAN connection
+**For LAN connection:**
 ```
 Host <linux-hostname>
     HostName <linux-ip>
@@ -34,7 +30,7 @@ Host <linux-hostname>
     RemoteForward 8259 127.0.0.1:8259
 ```
 
-### For Cloud (AWS, Oracle Cloud) connection
+**For Cloud (AWS, Oracle Cloud) connection:**
 ```
 Host <linux-hostname>
     HostName <linux-ip>
@@ -49,14 +45,14 @@ See the [OpenBSD ssh_config manual](https://man.openbsd.org/ssh_config) and [VS 
 
 Same office / home LAN, where the Linux box can reach `http://<Windows IP>:8259` directly. No reverse tunnel needed.
 
-### Happy case
-
+**Windows:**
 ```
-# Windows:
-Windows % vscode-server
+c:\> vscode-server
+```
 
-# Then, from the Linux SSH session:
-Linux $ remote-code
+**Then, from the Linux SSH session:**
+```
+$ remote-code
 ```
 
 Not working? See [1], [2], [3], [5] below.
@@ -65,17 +61,15 @@ Not working? See [1], [2], [3], [5] below.
 
 Cloud VM (OCI / AWS / etc.) cannot dial back to your home Windows PC (NAT / firewall). Open a reverse tunnel from Windows so the cloud box can reach `vscode-server` via localhost.
 
-### Happy case
-
+**Windows:**
 ```
-# Windows:
-Windows % vscode-server
+c:\> vscode-server
+c:\> ssh <linux-hostname>
+```
 
-# Windows (another terminal, requires RemoteForward in ssh config above):
-Windows % ssh <linux-hostname>
-
-# Linux (cloud, inside the tunneled SSH session):
-Linux $ remote-code
+**Linux (cloud, inside the tunneled SSH session):**
+```
+$ remote-code
 ```
 
 Not working? See [2], [3], [4], [5] below.
@@ -94,7 +88,7 @@ Linux $ nc -zv -w 3 <Windows-IP> 8259
 ### [2] Windows -> Linux: does SSH work without a password?
 
 ```powershell
-Windows % ssh <linux-hostname> "echo ssh-ok"
+c:\> ssh <linux-hostname> "echo ssh-ok"
 # expect: ssh-ok (no password prompt)
 # fail -> HostName / User / IdentityFile / key registration wrong
 ```
@@ -102,13 +96,13 @@ Windows % ssh <linux-hostname> "echo ssh-ok"
 For scripting / BatchMode check (fails instead of prompting):
 
 ```powershell
-Windows % ssh -o BatchMode=yes <linux-hostname> "echo ssh-ok"
+c:\> ssh -o BatchMode=yes <linux-hostname> "echo ssh-ok"
 ```
 
 ### [3] Windows -> Linux: does VS Code Remote-SSH open?
 
 ```powershell
-Windows % code --folder-uri "vscode-remote://ssh-remote+<linux-hostname>/home/user1/src/demo"
+c:\> code --folder-uri "vscode-remote://ssh-remote+<linux-hostname>/home/user1/src/demo"
 # expect: a VS Code window opens on that folder (close it after the test)
 # fail -> Host alias / User / Remote-SSH extension wrong
 ```
@@ -116,7 +110,7 @@ Windows % code --folder-uri "vscode-remote://ssh-remote+<linux-hostname>/home/us
 ### [4] Linux (cloud): is the reverse tunnel bound?
 
 ```bash
-Linux $ ss -tnlp4 | grep 8259
+$ ss -tnlp4 | grep 8259
 # expect: LISTEN 0 ... 127.0.0.1:8259 ...
 # empty -> tunnel not up (check the `ssh` session on Windows for RemoteForward)
 ```
