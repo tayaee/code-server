@@ -104,51 +104,6 @@ def _is_port_listening(host: str, port: int, timeout: float = 0.5) -> bool:
         return False
 
 
-def _pid_message(data: dict) -> str | None:
-    """Build the 'remote code launched, pid=.., taskkill ..' message.
-
-    Returns None when the server sent no PID info (e.g. old server).
-    """
-    if not isinstance(data, dict):
-        return None
-    raw_pids = data.get("vscode_pids") or []
-    try:
-        vscode_pids = [int(p) for p in raw_pids]  # type: ignore[union-attr]
-    except (TypeError, ValueError):
-        vscode_pids = []
-    pid = data.get("pid")
-    try:
-        pid = int(pid) if pid is not None else None
-    except (TypeError, ValueError):
-        pid = None
-    confidence = str(data.get("pid_confidence") or "").strip() or None
-    launcher_pid = data.get("launcher_pid")
-    try:
-        launcher_pid = int(launcher_pid) if launcher_pid is not None else None
-    except (TypeError, ValueError):
-        launcher_pid = None
-
-    if vscode_pids:
-        if len(vscode_pids) == 1:
-            p = vscode_pids[0]
-            return (f"Remote VS Code launched (pid {p}, estimated). "
-                    f"To stop it on Windows, run: taskkill /PID {p} /T /F")
-        joined = ", ".join(str(p) for p in vscode_pids)
-        flags = " ".join(f"/PID {p}" for p in vscode_pids)
-        return (f"Remote VS Code launched (pids {joined}, estimated). "
-                f"To stop on Windows, run: taskkill {flags} /T /F")
-    if pid is not None:
-        if confidence == "launcher" or (launcher_pid == pid):
-            return (f"Remote VS Code launch triggered (launcher pid {pid}; "
-                    f"VS Code window PID unknown). "
-                    f"To stop on Windows, run: taskkill /PID {pid} /T /F "
-                    f"(if the window remains, use taskkill /IM Code.exe /T /F)")
-        conf = f", {confidence}" if confidence else ""
-        return (f"Remote VS Code launched (pid {pid}{conf}). "
-                f"To stop it on Windows, run: taskkill /PID {pid} /T /F")
-    return None
-
-
 def _post_launch(url: str, body: bytes, token: str | None, timeout: float) -> tuple[str, int]:
     """POST the launch payload. Returns (raw_body, http_status).
 
@@ -287,16 +242,14 @@ def _run(path, path_opt, server, port, token, ssh_host, timeout, dry_run, verbos
         data = {"raw": raw}
     uri = data.get("uri", preview_uri) if isinstance(data, dict) else preview_uri
     if status == 200:
-        print(f"Connecting to {server}:{port} to run [code --folder-uri {uri}]")
         if isinstance(data, dict):
             if data.get("ssh_config") == "added":
                 print(f"[rvl] ssh config updated: log in as '{data.get('ssh_user')}'.",
                       file=sys.stderr)
             elif data.get("warning"):
                 print(f"[rvl] warning: {data['warning']}", file=sys.stderr)
-            pid_msg = _pid_message(data)
-            if pid_msg:
-                print(pid_msg)
+        print(f"Remote VS Code launched successfully via {server}:{port}")
+        print(f"  uri: {uri}")
         return 0
     print(f"[rvl] unexpected status HTTP {status}: {raw}", file=sys.stderr)
     return 1

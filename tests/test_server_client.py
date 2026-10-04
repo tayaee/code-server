@@ -6,7 +6,6 @@ from http.server import ThreadingHTTPServer
 
 import click
 
-from remote_vscode_launcher.client import _pid_message
 from remote_vscode_launcher.client import cli as client_cli
 from remote_vscode_launcher.client import main as client_main
 from remote_vscode_launcher.common import (
@@ -280,41 +279,13 @@ def test_server_reports_ssh_user_handling(monkeypatch, tmp_path):
         httpd.server_close()
 
 
-def test_pid_message_single():
-    msg = _pid_message({"vscode_pids": [1234], "pid": 1234, "pid_confidence": "estimated"})
-    assert "1234" in msg
-    assert "taskkill /PID 1234 /T /F" in msg
-
-
-def test_pid_message_multiple():
-    msg = _pid_message({"vscode_pids": [11, 22], "pid": 11, "pid_confidence": "estimated"})
-    assert "11" in msg and "22" in msg
-    assert "taskkill" in msg
-
-
-def test_pid_message_launcher_fallback():
-    msg = _pid_message({"vscode_pids": [], "pid": 99,
-                        "pid_confidence": "launcher", "launcher_pid": 99})
-    assert "99" in msg
-    assert "taskkill /PID 99" in msg
-
-
-def test_pid_message_none_when_no_info():
-    assert _pid_message({}) is None
-    assert _pid_message({"status": "launched"}) is None
-
-
-def test_server_returns_estimated_pid(monkeypatch):
+def test_server_launch_returns_no_pid(monkeypatch):
     from unittest import mock
 
     import remote_vscode_launcher.server as srv_mod
 
     fake_proc = mock.Mock()
     fake_proc.pid = 1111
-    # Deterministic sequence: before=[100], after=[100,2222].
-    seq = iter([[100], [100, 2222], [100, 2222]])
-    monkeypatch.setattr(srv_mod, "list_vscode_pids", lambda: next(seq, [100, 2222]))
-    monkeypatch.setattr(srv_mod.time, "sleep", lambda *a, **k: None)
     monkeypatch.setattr(srv_mod.subprocess, "Popen", lambda *a, **k: fake_proc)
 
     config = ServerConfig(host="127.0.0.1", port=0, token=None)
@@ -325,52 +296,22 @@ def test_server_returns_estimated_pid(monkeypatch):
     try:
         status, data = _post(port, {"path": "/tmp", "host": "h"})
         assert status == 200
-        assert data["launcher_pid"] == 1111
-        assert data["vscode_pids"] == [2222]
-        assert data["pid"] == 2222
-        assert data["pid_confidence"] == "estimated"
+        assert data["status"] == "launched"
+        assert data["uri"] == "vscode-remote://ssh-remote+h/tmp"
+        for key in ("launcher_pid", "vscode_pids", "pid", "pid_confidence"):
+            assert key not in data
     finally:
         httpd.shutdown()
         httpd.server_close()
 
 
-def test_server_launcher_pid_fallback_when_no_new_pid(monkeypatch):
+def test_client_prints_success_confirm(monkeypatch, capsys):
     from unittest import mock
 
     import remote_vscode_launcher.server as srv_mod
 
     fake_proc = mock.Mock()
     fake_proc.pid = 1111
-    monkeypatch.setattr(srv_mod, "list_vscode_pids", lambda: [100])
-    monkeypatch.setattr(srv_mod, "detect_new_vscode_pids", lambda before, timeout=5.0: [])
-    monkeypatch.setattr(srv_mod.subprocess, "Popen", lambda *a, **k: fake_proc)
-
-    config = ServerConfig(host="127.0.0.1", port=0, token=None)
-    httpd = ThreadingHTTPServer((config.host, config.port), make_handler(config))
-    port = httpd.server_address[1]
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
-    try:
-        status, data = _post(port, {"path": "/tmp", "host": "h"})
-        assert status == 200
-        assert data["vscode_pids"] == []
-        assert data["pid"] == 1111
-        assert data["pid_confidence"] == "launcher"
-    finally:
-        httpd.shutdown()
-        httpd.server_close()
-
-
-def test_client_prints_taskkill(monkeypatch, capsys):
-    from unittest import mock
-
-    import remote_vscode_launcher.server as srv_mod
-
-    fake_proc = mock.Mock()
-    fake_proc.pid = 1111
-    seq = iter([[100], [100, 3333], [100, 3333]])
-    monkeypatch.setattr(srv_mod, "list_vscode_pids", lambda: next(seq, [100, 3333]))
-    monkeypatch.setattr(srv_mod.time, "sleep", lambda *a, **k: None)
     monkeypatch.setattr(srv_mod.subprocess, "Popen", lambda *a, **k: fake_proc)
 
     config = ServerConfig(host="127.0.0.1", port=0, token=None)
@@ -382,8 +323,10 @@ def test_client_prints_taskkill(monkeypatch, capsys):
         rc = client_main(["--server", "127.0.0.1", "--port", str(port), "--ssh-host", "h"])
         assert rc == 0
         out = capsys.readouterr().out
-        assert "3333" in out
-        assert "taskkill /PID 3333 /T /F" in out
+        assert "successfully" in out
+        assert "vscode-remote://ssh-remote+h" in out
+        assert "taskkill" not in out
+        assert "pid" not in out.lower()
     finally:
         httpd.shutdown()
         httpd.server_close()
